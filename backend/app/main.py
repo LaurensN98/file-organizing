@@ -7,6 +7,9 @@ app = FastAPI(title="Intelligent Document Management System")
 
 @app.on_event("startup")
 def on_startup():
+    import os
+    key = os.getenv("OPENROUTER_API_KEY", "")
+    print(f"DEBUG: OPENROUTER_API_KEY loaded: {key[:5]}... (len={len(key)})")
     init_db()
 
 app.add_middleware(
