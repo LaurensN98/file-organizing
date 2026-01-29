@@ -64,12 +64,6 @@ export default function PrivacyPolicy() {
               <li><strong>No Training:</strong> We have configured our agreements to ensure your data is <strong>not</strong> used to train their models.</li>
             </ul>
           </section>
-
-          <section className="pt-8 border-t border-gray-100">
-            <p className="text-xs text-gray-400">
-              For further inquiries regarding your data rights, please contact our Data Protection Officer.
-            </p>
-          </section>
         </div>
       </div>
     </main>

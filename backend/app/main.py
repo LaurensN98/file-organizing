@@ -12,10 +12,13 @@ async def lifespan(app: FastAPI):
     print(f"DEBUG: OPENROUTER_API_KEY loaded: {key[:5]}... (len={len(key)})")
     init_db()
     yield
+    # Shutdown (if needed)
 
 app = FastAPI(
     title="Intelligent Document Management System",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None
 )
 
 app.add_middleware(
