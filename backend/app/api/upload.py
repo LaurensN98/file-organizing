@@ -88,9 +88,10 @@ async def upload_documents(background_tasks: BackgroundTasks, files: List[Upload
     t7 = time.time()
     logger.info(f"Zipping took {t7 - t6:.2f}s")
     
+    processing_time = round(time.time() - start_time, 2)
     logger.info(f"Total request processed in {processing_time}s")
     
-    # Prepare response data (exclude heavy content from JSON)
+    # Prepare response data 
     analysis_results = []
     for item in organized_data:
         analysis_results.append({

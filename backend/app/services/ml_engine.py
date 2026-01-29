@@ -59,7 +59,7 @@ async def get_cluster_label(texts: List[str]) -> str:
     # Construct a prompt with the first few documents
     prompt = "Based on the following document snippets, generate a concise (1-3 words) folder name that categorizes them. "
     prompt += "Do not use markdown formatting, bolding (like **), or special characters. Output only the plain text name:\n\n"
-    prompt += "\n---\n".join([t[:500] for t in texts[:3]])
+    prompt += "\n---\n".join([t[:500] for t in texts[:5]])
     
     try:
         response = await client.chat.completions.create(
@@ -100,15 +100,16 @@ async def generate_dataset_summary(organized_data: List[Dict]) -> str:
     prompt = "Analyze the following document snippets (categorized by cluster). "
     prompt += "Write a brief, 1-3 sentence description of what this entire dataset represents (e.g., 'A collection of legal contracts and financial invoices regarding...'). "
     prompt += "Do not use markdown. Keep it professional and concise:\n\n"
-    prompt += "\n".join(sample_texts[:10]) # Limit to 10 samples to fit context
+    prompt += "\n".join(sample_texts[:15]) # Limit to 15 samples to fit context
 
     try:
         response = await client.chat.completions.create(
             model="google/gemini-3-flash-preview",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=100
+            max_tokens=300
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        return content.strip() if content else "An organized collection of documents."
     except Exception as e:
         logger.error(f"Summary generation error: {e}")
         return "An organized collection of documents."
@@ -222,7 +223,10 @@ async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
         text_to_folder[text] = cluster_names[label]
         # Use the 2D visualization embeddings for coordinates
         if n_samples > 3:
-            text_to_coords[text] = {"x": float(embeddings_for_viz[i][0]), "y": float(embeddings_for_viz[i][1])}
+            # Force conversion to numpy array to satisfy type checker if needed, 
+            # though it should already be one. 
+            coords_row = np.asarray(embeddings_for_viz)[i]
+            text_to_coords[text] = {"x": float(coords_row[0]), "y": float(coords_row[1])}
         else:
             # Dummy coords for tiny datasets to prevent UI crash
             text_to_coords[text] = {"x": float(i), "y": float(i)}
