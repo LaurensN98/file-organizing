@@ -13,7 +13,7 @@ It is architected with a "Privacy by Design" philosophy, utilizing Zero Data Ret
 3. **Processing (ML Pipeline):**
     - **OCR:** Images are described using Multimodal LLM (Gemini Flash via OpenRouter).
     - **Embed:** External Embedding API (Qwen via OpenRouter/Nebius) via standard HTTPS requests.
-    - **Reduce:** UMAP (10D for clustering, 2D for visualization).
+    - **Reduce:** UMAP (5D for clustering, 2D for visualization).
     - **Cluster:** HDBSCAN (Density-based clustering).
     - **Label:** LLM (Google Gemini via OpenRouter) generates concise folder names based on cluster centroids.
 4. **Output A (Interactive Map):** A semantic 2D scatter plot visualizes the document landscape with zooming and metadata inspection.
@@ -27,6 +27,44 @@ It is architected with a "Privacy by Design" philosophy, utilizing Zero Data Ret
 - **Database:** PostgreSQL (Metadata storage).
 - **Async/Queue:** Redis & Celery (Background metadata processing).
 - **Infrastructure:** Docker & Docker Compose.
+
+### 1. Directory Structure
+The project follows this structure:
+```
+.
+├── backend/
+│   ├── app/
+│   │   ├── main.py              # FastAPI entry point
+│   │   ├── api/                 # Endpoints
+│   │   ├── core/                # Config & Security
+│   │   ├── services/
+│   │   │   ├── processing.py    # File reading, OCR, LangDetect
+│   │   │   ├── ml_engine.py     # Embeddings, UMAP, HDBSCAN, LLM Labeling
+│   │   │   └── privacy.py       # PII Scrubbing hooks
+│   │   └── models/              # Pydantic & SQLAlchemy models
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── app/                 # Next.js Pages
+│   │   ├── components/
+│   │   │   └── ResultsView.tsx  # Interactive Scatter Plot
+│   ├── Dockerfile
+│   └── package.json
+└── docker-compose.yml
+```
+
+## Production Readiness Matrix
+A comparison between this demonstration implementation and the target production architecture.
+
+| Feature | Demo Implementation (Local) | Production Standard (Target) |
+| :--- | :--- | :--- |
+| **Hosting** | Local Docker Compose | OVHcloud (Amsterdam/France regions) |
+| **Embeddings & LLM** | OpenRouter (Qwen / Gemini) | Mistral via OVH AI Endpoints (EU Sovereign) |
+| **Data Privacy** | In-Memory Processing (RAM) | Zero Data Retention (ZDR) + Signed DPA |
+| **Security** | HTTP (Localhost) | HTTPS (TLS 1.3) + Private VPC |
+| **PII Handling** | `scrub_pii()` hook (Placeholder) | Microsoft Presidio (Automated Redaction) |
+| **Concurrency** | AsyncIO + BackgroundTasks | Celery Workers + Redis Cluster |
 
 ## Production Improvements
 To transition from this prototype to a production-grade enterprise solution, the following enhancements are recommended:
@@ -50,16 +88,16 @@ To transition from this prototype to a production-grade enterprise solution, the
 
 1. **Clone the repository:**
    ```bash
-   git clone <repo-url>
-   cd document-management-system
+   git clone https://github.com/LaurensN98/file-organizing.git
+   cd file-organization
    ```
 
 2. **Environment Setup:**
    Create a `.env` file in `./backend`:
    ```env
-   DATABASE_URL=postgresql://user:password@db:5432/rebels_db
-   OPENROUTER_API_KEY=your_key_here
+   DATABASE_URL=postgresql://user:password@db:5432/db
    REDIS_URL=redis://redis:6379/0
+   OPENROUTER_API_KEY=your_key_here
    ```
 
 3. **Run with Docker:**

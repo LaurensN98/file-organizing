@@ -12,7 +12,6 @@ async def lifespan(app: FastAPI):
     print(f"DEBUG: OPENROUTER_API_KEY loaded: {key[:5]}... (len={len(key)})")
     init_db()
     yield
-    # Shutdown (if needed)
 
 app = FastAPI(
     title="Intelligent Document Management System",
