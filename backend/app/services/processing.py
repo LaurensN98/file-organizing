@@ -24,7 +24,6 @@ client = AsyncOpenAI(
 )
 
 async def extract_text_from_pdf(content: bytes) -> tuple[str, int]:
-    # ... (same as before)
     pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
     text = ""
     total_pages = len(pdf_reader.pages)
@@ -33,14 +32,19 @@ async def extract_text_from_pdf(content: bytes) -> tuple[str, int]:
         text += pdf_reader.pages[i].extract_text() or ""
     return text, total_pages
 
-async def extract_text_from_docx(content: bytes) -> tuple[str, int]:
-    # ... (same as before)
+async def extract_text_from_docx(content: bytes) -> tuple[str, int | None]:
     doc = Document(io.BytesIO(content))
     text = ""
     paragraphs = doc.paragraphs[:50] 
     for para in paragraphs:
         text += para.text + "\n"
-    return text, None
+    
+    try:
+        pages = doc.part.package.app_properties.pages
+    except:
+        pages = None
+        
+    return text, pages
 
 async def extract_description_from_image(content: bytes, mime_type: str) -> str:
     """Use Gemini Flash to describe the image content."""
@@ -63,7 +67,7 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> str:
                     ]
                 }
             ],
-            max_tokens=300
+            max_tokens=500
         )
         return response.choices[0].message.content or ""
     except Exception as e:
@@ -106,8 +110,6 @@ async def process_single_file(file_data: dict) -> Dict:
     language = "unk"
     if len(scrubbed_text.strip()) > 50:
         try:
-            # langdetect is synchronous, running it in thread pool might be better if cpu bound,
-            # but for short text it's fast enough.
             language = detect(scrubbed_text)
         except LangDetectException:
             language = "unk"
@@ -125,7 +127,6 @@ async def process_single_file(file_data: dict) -> Dict:
     }
 
 async def process_files(files: List[UploadFile]) -> List[Dict]:
-    file_tasks = []
     seen_filenames = {}
 
     # Pre-read all files (IO bound, but fast for memory) and prepare unique names
