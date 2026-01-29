@@ -107,7 +107,6 @@ To transition from this prototype to a production-grade enterprise solution, the
 
 ### Access
 - **Frontend:** [http://localhost:3000](http://localhost:3000)
-- **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## GDPR & Security Compliance
 This architecture ensures **Data Minimization**:
