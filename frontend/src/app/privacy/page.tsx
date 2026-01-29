@@ -1,3 +1,4 @@
+import React from "react";
 import Link from "next/link";
 import { ArrowLeft, Shield, Lock, Server } from "lucide-react";
 
@@ -45,8 +46,8 @@ export default function PrivacyPolicy() {
               Our infrastructure is designed to respect EU data sovereignty.
             </p>
             <ul className="list-disc pl-5 mt-2 text-sm text-gray-600 space-y-1">
-              <li>**Hosting:** Our core processing servers are located within the European Union (Amsterdam/France regions).</li>
-              <li>**Metadata:** We store only technical metadata (filenames, cluster categories, timestamps) in our database. We do not store the content of your documents.</li>
+              <li><strong>Hosting:</strong> Our core processing servers are located within the European Union (Amsterdam/France regions).</li>
+              <li><strong>Metadata:</strong> We store only technical metadata (filenames, cluster categories, timestamps) in our database. We do not store the content of your documents.</li>
             </ul>
           </section>
 
@@ -59,8 +60,8 @@ export default function PrivacyPolicy() {
               To provide intelligent categorization, we utilize third-party AI subprocessors.
             </p>
             <ul className="list-disc pl-5 mt-2 text-sm text-gray-600 space-y-1">
-              <li>**Embeddings & Classification:** Text snippets are sent to our AI providers (e.g., Mistral or GPT-OSS via OVHcloud EU endpoints) solely for the purpose of generating mathematical representations (embeddings) and category labels.</li>
-              <li>**No Training:** We have configured our agreements to ensure your data is <strong>not</strong> used to train their models.</li>
+              <li><strong>Embeddings & Classification:</strong> Text snippets are sent to our AI providers (e.g., Mistral or GPT-OSS via OVHcloud EU endpoints) solely for the purpose of generating mathematical representations (embeddings) and category labels.</li>
+              <li><strong>No Training:</strong> We have configured our agreements to ensure your data is <strong>not</strong> used to train their models.</li>
             </ul>
           </section>
 
