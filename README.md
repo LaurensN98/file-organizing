@@ -86,6 +86,18 @@ The project follows this structure:
 - **Consent:** Frontend must include a checkbox: "I agree to the Privacy Policy and understand data is processed in the EU."
 - **Scrubber Hook:** Include a placeholder function `scrub_pii(text)` in the processing pipeline to demonstrate where GDPR redaction would occur.
 
+## 🔮 Production Improvements
+To transition from this prototype to a production-grade enterprise solution, the following enhancements are recommended:
+
+*   **EU Hosting & Sovereign AI:** Deploy exclusively on EU-based cloud providers (e.g., OVHcloud, Scaleway) and use EU-hosted LLM endpoints to ensure immunity from the US CLOUD Act.
+*   **Private VPC:** Isolate the infrastructure within a Virtual Private Cloud (VPC) with strict firewall rules, ensuring no public internet access to the database or internal services.
+*   **Encrypted Object Store:** Replace in-memory processing with a secure, S3-compatible object store (e.g., MinIO) featuring server-side encryption (SSE) for temporary file handling.
+*   **DPA Agreements:** Establish formal Data Processing Agreements (DPAs) with all third-party AI subprocessors to legally guarantee data privacy and usage limitations.
+*   **AI Rate Limiting:** Implement robust rate limiting and circuit breakers on LLM API calls to prevent cost overruns and ensure service stability during high load.
+*   **HTTPS/SSL:** Enforce end-to-end encryption using TLS 1.3 with valid SSL certificates (e.g., via Let's Encrypt or a managed load balancer).
+*   **Celery & Redis Cluster:** Scale background processing by deploying multiple Celery workers across nodes and using a high-availability Redis cluster for the task queue.
+*   **Advanced PII Redaction:** Integrate enterprise-grade PII detection (like Microsoft Presidio) to automatically redact sensitive information (names, SSNs) before sending text to AI models.
+
 ## 🏃‍♂️ Getting Started
 
 ### Prerequisites
