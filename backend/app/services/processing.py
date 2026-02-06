@@ -4,7 +4,7 @@ import base64
 import asyncio
 import logging
 import time
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
 from fastapi import UploadFile
 import PyPDF2
 from docx import Document
@@ -23,7 +23,8 @@ client = AsyncOpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY", "dummy-key"),
 )
 
-async def extract_text_from_pdf(content: bytes) -> tuple[str, int]:
+def extract_text_from_pdf_sync(content: bytes) -> Tuple[str, int]:
+    """Strictly synchronous CPU work for PDF extraction."""
     pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
     text = ""
     total_pages = len(pdf_reader.pages)
@@ -32,7 +33,8 @@ async def extract_text_from_pdf(content: bytes) -> tuple[str, int]:
         text += pdf_reader.pages[i].extract_text() or ""
     return text, total_pages
 
-async def extract_text_from_docx(content: bytes) -> tuple[str, int | None]:
+def extract_text_from_docx_sync(content: bytes) -> Tuple[str, Optional[int]]:
+    """Strictly synchronous CPU work for DOCX extraction."""
     doc = Document(io.BytesIO(content))
     text = ""
     paragraphs = doc.paragraphs[:50] 
@@ -47,7 +49,7 @@ async def extract_text_from_docx(content: bytes) -> tuple[str, int | None]:
     return text, pages
 
 async def extract_description_from_image(content: bytes, mime_type: str) -> str:
-    """Use Gemini Flash to describe the image content."""
+    """Use Gemini Flash to describe the image content. Remains Async (I/O bound)."""
     base64_image = base64.b64encode(content).decode('utf-8')
     
     try:
@@ -74,57 +76,92 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> str:
         print(f"OCR Error: {e}")
         return ""
 
-async def process_single_file(file_data: dict) -> Dict:
-    content = file_data['content']
-    filename = file_data['filename']
-    file_size_kb = file_data['file_size_kb']
-    file_type = file_data['file_type']
-    
-    text = ""
-    page_count = None
-
-    if filename.lower().endswith(".pdf"):
-        try:
-            text, page_count = await extract_text_from_pdf(content)
-        except:
-            text = ""
-    elif filename.lower().endswith(".docx"):
-        try:
-            text, page_count = await extract_text_from_docx(content)
-        except:
-            text = ""
-    elif filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-        try:
-            mime_type = f"image/{file_type if file_type != 'jpg' else 'jpeg'}"
-            text = await extract_description_from_image(content, mime_type)
-        except:
-            text = ""
-    else:
-        try:
-            text = content.decode("utf-8")[:2000]
-        except:
-            text = ""
-
+def _worker_analyze_text(text: str, filename: str, content: bytes, file_data: dict, page_count: Optional[int]) -> Dict:
+    """
+    Shared logic for Scrubbing and Language Detection.
+    Runs in a separate thread.
+    """
+    # Scrubbing (CPU Heavy Regex)
     scrubbed_text = scrub_pii(text)
     
+    # Language Detection (CPU Heavy Math)
     language = "unk"
     if len(scrubbed_text.strip()) > 50:
         try:
             language = detect(scrubbed_text)
         except LangDetectException:
             language = "unk"
-    
+            
     return {
         "filename": filename,
         "content": content,
         "text": scrubbed_text,
         "metadata": {
-            "file_size_kb": file_size_kb,
-            "file_type": file_type,
+            "file_size_kb": file_data['file_size_kb'],
+            "file_type": file_data['file_type'],
             "page_count": page_count,
             "language": language
         }
     }
+
+def _worker_process_document_cpu(file_data: dict) -> Dict:
+    """
+    Handles PDF/DOCX/Text extraction + Scrubbing + Detection.
+    Runs entirely in a separate thread.
+    """
+    content = file_data['content']
+    filename = file_data['filename']
+    
+    text = ""
+    page_count = None
+
+    # 1. Extraction (CPU Heavy)
+    if filename.lower().endswith(".pdf"):
+        try:
+            text, page_count = extract_text_from_pdf_sync(content)
+        except:
+            text = ""
+    elif filename.lower().endswith(".docx"):
+        try:
+            text, page_count = extract_text_from_docx_sync(content)
+        except:
+            text = ""
+    else:
+        # Plain text decoding
+        try:
+            text = content.decode("utf-8")[:2000]
+        except:
+            text = ""
+
+    # 2. Analysis (CPU Heavy)
+    return _worker_analyze_text(text, filename, content, file_data, page_count)
+
+async def process_single_file(file_data: dict) -> Dict:
+    filename = file_data['filename']
+    content = file_data['content']
+    file_type = file_data['file_type']
+
+    # --- PATH A: Images (Async I/O + Threaded Analysis) ---
+    if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+        try:
+            mime_type = f"image/{file_type if file_type != 'jpg' else 'jpeg'}"
+            
+            # 1. AWAIT the API call (Keep this on the main loop!)
+            text = await extract_description_from_image(content, mime_type)
+        except:
+            text = ""
+            
+        # 2. Offload the scrubbing/detection of the image description to a thread
+        return await asyncio.to_thread(
+            _worker_analyze_text, 
+            text, filename, content, file_data, None
+        )
+
+    # --- PATH B: Documents (Pure CPU Offload) ---
+    else:
+        # Offload the ENTIRE chain (Extract -> Scrub -> Detect)
+        # The main event loop is instantly free to handle the next request.
+        return await asyncio.to_thread(_worker_process_document_cpu, file_data)
 
 async def process_files(files: List[UploadFile]) -> List[Dict]:
     seen_filenames = {}
@@ -158,10 +195,10 @@ async def process_files(files: List[UploadFile]) -> List[Dict]:
     # Create tasks for parallel processing
     logger.info(f"Processing {len(files_to_process)} files concurrently...")
     t0 = time.time()
-    tasks = [process_single_file(f) for f in files_to_process]
     
     # Run all tasks concurrently
-    processed_files = await asyncio.gather(*tasks)
+    processed_files = await asyncio.gather(*[process_single_file(f) for f in files_to_process])
+    
     logger.info(f"Parallel processing finished in {time.time() - t0:.2f}s")
     
     return processed_files
