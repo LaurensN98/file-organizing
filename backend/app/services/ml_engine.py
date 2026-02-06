@@ -114,33 +114,13 @@ async def generate_dataset_summary(organized_data: List[Dict]) -> str:
         logger.error(f"Summary generation error: {e}")
         return "An organized collection of documents."
 
-async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
+def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.ndarray, np.ndarray]:
     """
-    Core ML Pipeline:
-    1. Embed text (Qwen/OpenRouter)
-    2. Reduce dimensions (UMAP)
-    3. Cluster (HDBSCAN)
-    4. Label clusters (Gemini/OpenRouter)
+    Synchronous worker for CPU-intensive UMAP and HDBSCAN tasks.
+    Runs in a separate thread.
     """
-    if not processed_data:
-        return []
-
-    texts = [d["text"] for d in processed_data if d["text"].strip()]
-    n_samples = len(texts)
-
-    if n_samples < 2:
-        for d in processed_data:
-            d["folder"] = "Misc"
-        return processed_data
-
-    # 1. Embeddings
-    t0 = time.time()
-    embeddings = await get_embeddings(texts)
-    logger.info(f"Embeddings generated in {time.time() - t0:.2f}s")
-    
     # 2. Dimensionality Reduction (UMAP)
     # Adjust parameters for small datasets to prevent spectral initialization errors
-    t1 = time.time()
     init_mode = "random" if n_samples < 15 else "spectral"
     n_neighbors = min(n_samples - 1, 15)
     
@@ -174,10 +154,7 @@ async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
         )
          embeddings_for_viz = reducer_viz.fit_transform(embeddings)
 
-    logger.info(f"UMAP reduction took {time.time() - t1:.2f}s")
-    
     # 3. Clustering (HDBSCAN)
-    t2 = time.time()
     clusterer = HDBSCAN(
         min_cluster_size=2,
         cluster_selection_epsilon=0.5, 
@@ -185,7 +162,41 @@ async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
         )
     # Use the higher dimensional embeddings for better clustering
     cluster_labels = clusterer.fit_predict(embeddings_for_clustering)
-    logger.info(f"HDBSCAN clustering took {time.time() - t2:.2f}s")
+    
+    return cluster_labels, embeddings_for_viz
+
+async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
+    """
+    Core ML Pipeline:
+    1. Embed text (Qwen/OpenRouter)
+    2. Reduce dimensions (UMAP)
+    3. Cluster (HDBSCAN)
+    4. Label clusters (Gemini/OpenRouter)
+    """
+    if not processed_data:
+        return []
+
+    texts = [d["text"] for d in processed_data if d["text"].strip()]
+    n_samples = len(texts)
+
+    if n_samples < 2:
+        for d in processed_data:
+            d["folder"] = "Misc"
+        return processed_data
+
+    # 1. Embeddings (I/O Bound - Async)
+    t0 = time.time()
+    embeddings = await get_embeddings(texts)
+    logger.info(f"Embeddings generated in {time.time() - t0:.2f}s")
+    
+    # 2 & 3. Reduction & Clustering (CPU Bound - Offload to Thread)
+    t1 = time.time()
+    
+    cluster_labels, embeddings_for_viz = await asyncio.to_thread(
+        _worker_run_clustering, embeddings, n_samples
+    )
+
+    logger.info(f"UMAP & HDBSCAN took {time.time() - t1:.2f}s")
     
     # 4. Labeling Clusters (Parallelized)
     t3 = time.time()
