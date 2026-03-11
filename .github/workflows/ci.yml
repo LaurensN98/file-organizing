@@ -19,12 +19,13 @@ jobs:
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: db
-        ports: ["5432:5432"]
       redis:
         image: redis:7-alpine
-        ports: ["6379:6379"]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Lowercase repo name
+        run: echo "repo_name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -41,20 +42,20 @@ jobs:
         with:
           context: ./backend
           load: true
-          tags: ghcr.io/${{ github.repository }}/backend:test
+          tags: ghcr.io/${{ env.repo_name }}/backend:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run Backend Tests
         run: |
-          docker run --rm --network host ghcr.io/${{ github.repository }}/backend:test pytest
+          docker run --rm --network host ghcr.io/${{ env.repo_name }}/backend:test pytest
 
       - name: Push Backend Image
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         run: |
           TAG_NAME=${{ github.ref == 'refs/heads/main' && 'latest' || 'staging' }}
-          docker tag ghcr.io/${{ github.repository }}/backend:test ghcr.io/${{ github.repository }}/backend:$TAG_NAME
-          docker push ghcr.io/${{ github.repository }}/backend:$TAG_NAME
+          docker tag ghcr.io/${{ env.repo_name }}/backend:test ghcr.io/${{ env.repo_name }}/backend:$TAG_NAME
+          docker push ghcr.io/${{ env.repo_name }}/backend:$TAG_NAME
 
   # --- Frontend CI ---
   frontend:
@@ -64,6 +65,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Lowercase repo name
+        run: echo "repo_name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -80,18 +84,18 @@ jobs:
         with:
           context: ./frontend
           load: true
-          tags: ghcr.io/${{ github.repository }}/frontend:test
+          tags: ghcr.io/${{ env.repo_name }}/frontend:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run Frontend Lint and Test
         run: |
-          docker run --rm ghcr.io/${{ github.repository }}/frontend:test npm run lint
-          docker run --rm ghcr.io/${{ github.repository }}/frontend:test npm test
+          docker run --rm ghcr.io/${{ env.repo_name }}/frontend:test npm run lint
+          docker run --rm ghcr.io/${{ env.repo_name }}/frontend:test npm test
 
       - name: Push Frontend Image
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         run: |
           TAG_NAME=${{ github.ref == 'refs/heads/main' && 'latest' || 'staging' }}
-          docker tag ghcr.io/${{ github.repository }}/frontend:test ghcr.io/${{ github.repository }}/frontend:$TAG_NAME
-          docker push ghcr.io/${{ github.repository }}/frontend:$TAG_NAME
+          docker tag ghcr.io/${{ env.repo_name }}/frontend:test ghcr.io/${{ env.repo_name }}/frontend:$TAG_NAME
+          docker push ghcr.io/${{ env.repo_name }}/frontend:$TAG_NAME
