@@ -1,12 +1,63 @@
 services:
+  frontend:
+    build: ./frontend
+    networks:
+      - ai_network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NODE_ENV=development
+    command: npm run dev
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    networks:
+      - ai_network
+    volumes:
+      - ./backend:/app
+      - file_uploads:/app/uploads
+    env_file:
+      - ./backend/.env
+    environment:
+      - QDRANT_HOST=vector_db
+      - INFERENCE_URL=http://inference:7997/v1
+      - NUMBA_CACHE_DIR=/tmp
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+      vector_db:
+        condition: service_healthy
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "8000:8000"
+
   db:
     image: postgres:15-alpine
+    networks:
+      - ai_network
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d db"]
       interval: 5s
@@ -15,38 +66,68 @@ services:
 
   redis:
     image: redis:7-alpine
+    networks:
+      - ai_network
+    restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  backend:
+  celery_worker:
     build: ./backend
+    networks:
+      - ai_network
+    command: celery -A app.celery_app worker --loglevel=info
+    restart: on-failure
     volumes:
       - ./backend:/app
+      - file_uploads:/app/uploads
     env_file:
       - ./backend/.env
+    environment:
+      - NUMBA_CACHE_DIR=/tmp
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "8000:8000"
+      vector_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  frontend:
-    build: ./frontend
+  vector_db:
+    image: qdrant/qdrant
+    networks:
+      - ai_network
+    restart: always
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+      - vector_db_data:/qdrant/storage
     ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    depends_on:
-      - backend
+      - "6333:6333"
+    healthcheck:
+      # This checks if the port is open at the network level
+      test: ["CMD", "printf", "", ">", "/dev/tcp/127.0.0.1/6333"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
 volumes:
   postgres_data:
+  vector_db_data:
+  file_uploads:
+
+networks:
+  ai_network:
+    driver: bridge
