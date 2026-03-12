@@ -48,7 +48,7 @@ jobs:
 
       - name: Run Backend Tests
         run: |
-          docker run --rm --network host ghcr.io/${{ env.repo_name }}/backend:test pytest
+          docker run --rm --network host -e PYTHONPATH=/app ghcr.io/${{ env.repo_name }}/backend:test pytest
 
       - name: Push Backend Image
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
