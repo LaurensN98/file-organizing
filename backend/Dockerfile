@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y \
 # 3. Copy installed packages from builder
 COPY --from=builder /root/.local /home/python/.local
 ENV PATH=/home/python/.local/bin:$PATH
+ENV NUMBA_CACHE_DIR=/tmp
 
 # 4. Copy code and ensure the 'python' user owns it
 COPY --chown=python:python . .
