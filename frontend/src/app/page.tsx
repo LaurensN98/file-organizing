@@ -1,16 +1,20 @@
 "use client";
 
 import React, { useState } from "react";
-import { Upload, Shield, FileText, Check, Loader2, FolderOpen, FolderInput } from "lucide-react";
+import Image from "next/image";
+import { Upload, FileText, Loader2, FolderInput } from "lucide-react";
 import axios from "axios";
 import { clsx } from "clsx";
-import ResultsView from "@/components/ResultsView";
+import ResultsView, {
+  AnalysisItem,
+  SummaryData,
+} from "@/components/ResultsView";
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [analysisData, setAnalysisData] = useState<any>(null);
-  const [summaryData, setSummaryData] = useState<any>(null);
+  const [analysisData, setAnalysisData] = useState<AnalysisItem[] | null>(null);
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [zipBase64, setZipBase64] = useState<string>("");
   const [consent, setConsent] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -27,14 +31,13 @@ export default function Home() {
     try {
       const response = await axios.post(
         `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/upload`,
-        formData
+        formData,
       );
 
       // Store analysis, summary, and zip
       setAnalysisData(response.data.analysis);
       setSummaryData(response.data.summary);
       setZipBase64(response.data.zip_file);
-      
     } catch (error) {
       console.error("Upload failed", error);
       alert("Something went wrong. Please check your connection.");
@@ -80,15 +83,16 @@ export default function Home() {
     <main className="relative min-h-screen flex items-center justify-center p-6 overflow-hidden bg-[#0A0A0A]">
       {/* Full Screen Background with Blur */}
       <div className="absolute inset-0 z-0">
-        <img 
-          src="/images/backdrop.webp" 
-          alt="Background" 
-          className="w-full h-full object-cover opacity-40 blur-[1px] scale-105"
+        <Image
+          src="/images/backdrop.webp"
+          alt="Background"
+          fill
+          priority
+          className="object-cover opacity-40 blur-[1px] scale-105"
         />
       </div>
 
       <div className="relative z-10 w-full max-w-4xl animate-in fade-in zoom-in-95 duration-500 flex flex-col items-center">
-        
         {/* Header - White text for better contrast against darker-balanced bg */}
         {!analysisData && (
           <div className="mb-8 text-center">
@@ -102,19 +106,19 @@ export default function Home() {
         )}
 
         {analysisData ? (
-          <ResultsView 
-            analysis={analysisData} 
+          <ResultsView
+            analysis={analysisData}
             summary={summaryData}
-            zipBase64={zipBase64} 
-            onReset={handleReset} 
+            zipBase64={zipBase64}
+            onReset={handleReset}
           />
         ) : (
           /* Glassmorphism Card */
           <div className="w-full max-w-md bg-white/20 backdrop-blur-md rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] border border-white/30 overflow-hidden animate-in fade-in zoom-in-95 duration-700">
-            <div 
+            <div
               className={clsx(
                 "p-10 transition-colors duration-200 ease-in-out border-b border-white/10 flex flex-col items-center",
-                dragActive ? "bg-white/10" : "bg-transparent"
+                dragActive ? "bg-white/10" : "bg-transparent",
               )}
               onDragEnter={handleDrag}
               onDragLeave={handleDrag}
@@ -132,17 +136,23 @@ export default function Home() {
                 type="file"
                 className="hidden"
                 id="folder-upload"
-                {...{ webkitdirectory: "", directory: "" } as any}
+                {...({
+                  webkitdirectory: "",
+                  directory: "",
+                } as React.InputHTMLAttributes<HTMLInputElement>)}
                 onChange={(e) => addFiles(e.target.files)}
               />
-              
+
               <div className="flex gap-10 w-full justify-center">
-                <label 
-                  htmlFor="file-upload" 
+                <label
+                  htmlFor="file-upload"
                   className="flex flex-col items-center justify-center cursor-pointer group flex-1"
                 >
                   <div className="mb-4 h-14 w-14 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center group-hover:bg-white group-hover:text-black transition-all duration-500 border border-white/20">
-                    <Upload size={24} className="text-white/80 group-hover:text-black" />
+                    <Upload
+                      size={24}
+                      className="text-white/80 group-hover:text-black"
+                    />
                   </div>
                   <p className="text-xs font-bold text-white/90 uppercase tracking-widest group-hover:text-white transition-colors">
                     Files
@@ -151,12 +161,15 @@ export default function Home() {
 
                 <div className="w-px bg-white/10 self-stretch my-2" />
 
-                <label 
-                  htmlFor="folder-upload" 
+                <label
+                  htmlFor="folder-upload"
                   className="flex flex-col items-center justify-center cursor-pointer group flex-1"
                 >
                   <div className="mb-4 h-14 w-14 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center group-hover:bg-white group-hover:text-black transition-all duration-500 border border-white/20">
-                    <FolderInput size={24} className="text-white/80 group-hover:text-black" />
+                    <FolderInput
+                      size={24}
+                      className="text-white/80 group-hover:text-black"
+                    />
                   </div>
                   <p className="text-xs font-bold text-white/90 uppercase tracking-widest group-hover:text-white transition-colors">
                     Folder
@@ -181,8 +194,20 @@ export default function Home() {
                   checked={consent}
                   onChange={(e) => setConsent(e.target.checked)}
                 />
-                <label htmlFor="consent" className="text-[11px] text-white/70 leading-relaxed cursor-pointer select-none">
-                  I have read and agree to the <a href="/privacy" target="_blank" className="underline hover:text-white font-bold transition-colors">Privacy Policy</a>, and I understand that my data will be processed by AI subprocessors hosted in the EU.
+                <label
+                  htmlFor="consent"
+                  className="text-[11px] text-white/70 leading-relaxed cursor-pointer select-none"
+                >
+                  I have read and agree to the{" "}
+                  <a
+                    href="/privacy"
+                    target="_blank"
+                    className="underline hover:text-white font-bold transition-colors"
+                  >
+                    Privacy Policy
+                  </a>
+                  , and I understand that my data will be processed by AI
+                  subprocessors hosted in the EU.
                 </label>
               </div>
 
@@ -193,7 +218,7 @@ export default function Home() {
                   "w-full h-12 rounded-2xl text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-500",
                   isUploading || files.length === 0 || !consent
                     ? "bg-white/5 text-white/20 cursor-not-allowed border border-white/5"
-                    : "bg-white text-black hover:bg-white/90 hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+                    : "bg-white text-black hover:bg-white/90 hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_20px_rgba(255,255,255,0.3)]",
                 )}
               >
                 {isUploading ? (
