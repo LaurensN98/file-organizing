@@ -13,6 +13,7 @@ const satoshi = localFont({
 export const metadata: Metadata = {
   title: "Intelligent Document Management",
   description: "Privacy-focused document organization using AI",
+  manifest: "/site.webmanifest",
 };
 
 export default function RootLayout({
