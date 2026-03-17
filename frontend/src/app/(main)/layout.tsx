@@ -11,7 +11,7 @@ const satoshi = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Intelligent Document Management",
+  title: "Organize Your File Automatically | Neatly",
   description: "Privacy-focused document organization using AI",
   manifest: "/site.webmanifest",
 };
