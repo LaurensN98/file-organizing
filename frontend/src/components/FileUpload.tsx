@@ -125,7 +125,10 @@ export default function FileUpload() {
   return (
     <div className=" flex flex-col gap-4">
       <div
-        className="h-96 bg-blue-50/50 border border-blue-600 border-dashed rounded-2xl hover:bg-blue-600/5 transition-all duration-300 flex flex-col items-center justify-center text-center p-8 group"
+        className={clsx(
+          "h-96 bg-blue-50/50 border border-blue-600 border-dashed rounded-2xl hover:bg-blue-600/5 transition-all duration-300 flex flex-col items-center justify-center text-center p-8 group",
+          dragActive ? "bg-blue-600/10" : "bg-blue-50/50",
+        )}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
