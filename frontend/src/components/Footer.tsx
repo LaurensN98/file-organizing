@@ -1,9 +1,6 @@
-"use client";
-
 import Image from "next/image";
 import Link from "next/link";
-import { Github, Twitter, Linkedin, Mail, ArrowUpRight } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowUpRight } from "lucide-react";
 
 const footerLinks = [
   {
@@ -36,17 +33,25 @@ const footerLinks = [
 
 const socialLinks = [
   {
-    icon: <Twitter size={20} />,
+    icon: <i className="bi bi-twitter-x"></i>,
     href: "https://twitter.com",
     label: "Twitter",
   },
   {
-    icon: <Linkedin size={20} />,
+    icon: <i className="bi bi-linkedin"></i>,
     href: "https://linkedin.com",
     label: "LinkedIn",
   },
-  { icon: <Github size={20} />, href: "https://github.com", label: "GitHub" },
-  { icon: <Mail size={20} />, href: "mailto:hello@neatly.com", label: "Email" },
+  {
+    icon: <i className="bi bi-github"></i>,
+    href: "https://github.com",
+    label: "GitHub",
+  },
+  {
+    icon: <i className="bi bi-envelope-fill"></i>,
+    href: "mailto:hello@neatly.com",
+    label: "Email",
+  },
 ];
 
 export default function Footer() {
@@ -54,13 +59,13 @@ export default function Footer() {
 
   return (
     <div className="bg-white">
-      <footer className="w-full bg-white border-t border-gray-100 py-16 px-12 max-w-7xl mx-auto overflow-hidden">
+      <footer className="w-full bg-white border-t border-gray-100 py-20 px-12 max-w-7xl mx-auto overflow-hidden">
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 lg:gap-8 mb-16">
             {/* Brand Column */}
             <div className="lg:col-span-2 space-y-6">
               <Link href="/" className="inline-block group">
-                <div className="w-48 transition-transform duration-300 group-hover:scale-105">
+                <div className="w-48">
                   <Image
                     src="/svgs/logo.svg"
                     alt="Neatly Logo"
@@ -71,22 +76,21 @@ export default function Footer() {
                 </div>
               </Link>
               <p className="text-gray-500 max-w-sm text-sm leading-relaxed">
-                Neatly helps you organize your files with ease. Our AI-powered
-                solution ensures your documents are always where they belong.
+                Neatly helps you organize your files with ease. Our solution
+                ensures your documents are always where they belong.
               </p>
               <div className="flex gap-4">
                 {socialLinks.map((social) => (
-                  <motion.a
+                  <Link
                     key={social.label}
                     href={social.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2 rounded-full bg-gray-50 text-[#203047] hover:bg-[#203047] hover:text-white transition-colors duration-300"
-                    whileHover={{ y: -3 }}
+                    className="text-[#203047] hover:text-black duration-300"
                     aria-label={social.label}
                   >
                     {social.icon}
-                  </motion.a>
+                  </Link>
                 ))}
               </div>
             </div>
