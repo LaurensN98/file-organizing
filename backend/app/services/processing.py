@@ -10,18 +10,13 @@ import PyPDF2
 from docx import Document
 from app.services.privacy import scrub_pii
 from langdetect import detect, LangDetectException
-from openai import AsyncOpenAI
+from app.services.openai_client import client
 
 logger = logging.getLogger(__name__)
 
 # Suppress PyPDF2 warnings
 logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
-# Initialize async client for OCR/Vision
-client = AsyncOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY", "dummy-key"),
-)
 
 def extract_text_from_pdf_sync(content: bytes) -> Tuple[str, int]:
     """Strictly synchronous CPU work for PDF extraction."""
@@ -163,15 +158,24 @@ async def process_single_file(file_data: dict) -> Dict:
         # The main event loop is instantly free to handle the next request.
         return await asyncio.to_thread(_worker_process_document_cpu, file_data)
 
-async def process_files(files: List[UploadFile]) -> List[Dict]:
+async def process_files(files_data: List[Dict]) -> List[Dict]:
     seen_filenames = {}
 
-    # Pre-read all files (IO bound, but fast for memory) and prepare unique names
+    # Prepare unique names and metadata
     files_to_process = []
     
-    for file in files:
-        content = await file.read()
-        original_filename = file.filename
+    for file_item in files_data:
+        if "path" in file_item:
+            try:
+                with open(file_item["path"], "rb") as f:
+                    content = f.read()
+            except Exception as e:
+                logger.error(f"Failed to read file from path {file_item.get('path')}: {e}")
+                continue
+        else:
+            content = file_item["content"]
+            
+        original_filename = file_item["filename"]
         base_name = original_filename.split("/")[-1].split("\\")[-1]
         
         if base_name in seen_filenames:
