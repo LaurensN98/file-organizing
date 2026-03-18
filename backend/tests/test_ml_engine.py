@@ -34,7 +34,7 @@ async def test_get_cluster_label():
     with patch("app.services.ml_engine.client.chat.completions.create", new_callable=AsyncMock) as mock_create:
         mock_create.return_value = mock_response
         
-        label = await get_cluster_label(["Some financial text content about invoices and money."])
+        label = await get_cluster_label([{"filename": "test.pdf", "text": "Some financial text content about invoices and money."}])
         
         assert label == "Financial Reports"
         assert mock_create.called
@@ -76,7 +76,7 @@ async def test_clustering_pipeline_tiny_dataset():
 async def test_clustering_pipeline_full_flow():
     # Mock all external calls to test the logic flow
     texts = ["apple " * 10, "banana " * 10, "cherry " * 10, "date " * 10, "elderberry " * 10]
-    processed_data = [{"text": t, "metadata": {"file_size_kb": 1}} for t in texts]
+    processed_data = [{"filename": f"doc_{i}.txt", "text": t, "metadata": {"file_size_kb": 1}} for i, t in enumerate(texts)]
     
     # 1. Mock dense embeddings
     with patch("app.services.ml_engine.get_embeddings", new_callable=AsyncMock) as mock_emb, \

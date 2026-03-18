@@ -188,14 +188,30 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
     n_samples = len(texts)
     logger.info(f"Number of samples for ML processing: {n_samples}")
 
-    # For tiny datasets, we still want to proceed to get embeddings, but clustering will be trivial
-    if n_samples < 2:
-        logger.info("Tiny dataset detected, skipping complex clustering.")
+
+
 
     # 1. Embeddings (I/O Bound - Async)
     t0 = time.time()
     embeddings = await get_embeddings(texts)
     logger.info(f"Embeddings generated in {time.time() - t0:.2f}s")
+
+    # Generate sparse embeddings in batches to avoid timeouts on CPU
+    logger.info(f"Generating sparse embeddings for {n_samples} documents...")
+    all_sparse_embeddings = await generate_sparse_embeddings(texts, batch_size=32)
+    logger.info(f"Sparse embeddings successfully generated.")
+
+    # For tiny datasets, return immediately to avoid HDBSCAN/UMAP errors
+    if n_samples < 2:
+        logger.info("Tiny dataset detected, skipping complex clustering.")
+        for i, d in enumerate(processed_data):
+            d["folder"] = "Unsorted"
+            d["x"], d["y"] = 0.0, 0.0
+            # Safety check: if embeddings is a numpy array, it has .tolist()
+            d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
+            d["sparse_embedding"] = all_sparse_embeddings[i] if i < len(all_sparse_embeddings) else {}
+        return processed_data, "An organized collection of documents."
+
     
     # 2 & 3. Reduction & Clustering (CPU Bound - Offload to Thread)
     t1 = time.time()
