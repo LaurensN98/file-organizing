@@ -9,8 +9,17 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# Install to a specific prefix to make copying easier
+# Layer 1: Install heavy scientific dependencies first to maximize cache hits
+RUN pip install --user --no-cache-dir \
+    numpy==2.3.5 \
+    scipy==1.17.0 \
+    scikit-learn==1.6.1 \
+    numba==0.63.1 \
+    umap-learn==0.5.5
+
+# Layer 2: Install remaining dependencies
 RUN pip install --user --no-cache-dir -r requirements.txt
+
 
 
 # --- STAGE 2: Runner ---

@@ -56,13 +56,21 @@ async def test_generate_dataset_summary():
 
 @pytest.mark.asyncio
 async def test_clustering_pipeline_tiny_dataset():
-    # Test with very few samples (should return dummy folders)
-    processed_data = [{"text": "single document", "metadata": {}}]
-    
-    organized_data, summary = await clustering_pipeline(processed_data)
-    
-    assert organized_data[0]["folder"] == "Misc"
-    assert summary == "A collection of documents."
+    # Mock both embedded types to avoid real network attempts
+    with patch("app.services.ml_engine.get_embeddings", new_callable=AsyncMock) as mock_dense, \
+         patch("app.services.ml_engine.generate_sparse_embeddings", new_callable=AsyncMock) as mock_sparse:
+        
+        mock_dense.return_value = np.array([[0.1] * 1536])
+        mock_sparse.return_value = [{"1": 0.5}]
+        
+        # Test with very few samples (should return dummy folders)
+        processed_data = [{"filename": "doc1.txt", "text": "single document", "metadata": {}}]
+        
+        organized_data, summary = await clustering_pipeline(processed_data)
+        
+        assert organized_data[0]["folder"] == "Unsorted"
+        assert summary == "An organized collection of documents."
+
 
 @pytest.mark.asyncio
 async def test_clustering_pipeline_full_flow():
@@ -70,9 +78,12 @@ async def test_clustering_pipeline_full_flow():
     texts = ["apple " * 10, "banana " * 10, "cherry " * 10, "date " * 10, "elderberry " * 10]
     processed_data = [{"text": t, "metadata": {"file_size_kb": 1}} for t in texts]
     
-    # 1. Mock get_embeddings to return random noise
-    with patch("app.services.ml_engine.get_embeddings", new_callable=AsyncMock) as mock_emb:
+    # 1. Mock dense embeddings
+    with patch("app.services.ml_engine.get_embeddings", new_callable=AsyncMock) as mock_emb, \
+         patch("app.services.ml_engine.generate_sparse_embeddings", new_callable=AsyncMock) as mock_sparse:
+        
         mock_emb.return_value = np.random.rand(len(texts), 1536)
+        mock_sparse.return_value = [{} for _ in texts]
         
         # 2. Mock labeler
         with patch("app.services.ml_engine.get_cluster_label", new_callable=AsyncMock) as mock_label:
@@ -83,6 +94,7 @@ async def test_clustering_pipeline_full_flow():
                 mock_sum.return_value = "Mock Summary"
                 
                 organized_data, summary = await clustering_pipeline(processed_data)
+
                 
                 assert len(organized_data) == len(texts)
                 assert summary == "Mock Summary"
