@@ -116,7 +116,7 @@ export default function ResultView({
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const response = await axios.post(`${apiUrl}/api/vector-search`, null, {
-        params: { query: searchQuery, limit: 50 },
+        params: { query: searchQuery, limit: 25 },
       });
       // The endpoint returns a list of {id, filename, folder, score}
       const scoreMap: Record<string, number> = {};
@@ -152,27 +152,14 @@ export default function ResultView({
   const formatMB = (kb: number) => Math.round((kb / 1024) * 10) / 10;
 
   const handleDownload = () => {
-    if (!zip) return;
-    try {
-      const byteCharacters = atob(zip);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: "application/zip" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "organized_documents.zip";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Download failed", e);
-      alert("Failed to process download.");
-    }
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const url = `${apiUrl}/api/download/${batchId}`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "organized_documents.zip";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // --- LOADING / ERROR STATES ---

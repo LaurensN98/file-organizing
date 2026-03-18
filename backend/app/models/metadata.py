@@ -15,7 +15,6 @@ class UploadBatch(Base):
     status = Column(String(20), default="PENDING") # PENDING, PROCESSING, SUCCESS, FAILED
     error_message = Column(Text, nullable=True)
     summary = Column(JSON, nullable=True) # stores stats + description
-    zip_base64 = Column(Text, nullable=True) # The organized ZIP
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     # Relationship to docs

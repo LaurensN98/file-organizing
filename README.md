@@ -8,7 +8,7 @@
 
 - **AI-Powered Labeling:** Automatically generates semantic folder names and dataset summaries using LLMs (MiMo v2 Flash).
 - **Unsupervised Clustering:** Uses **UMAP** for dimensionality reduction and **HDBSCAN** for high-accuracy density-based document grouping.
-- **Hybrid Search:** Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Reciprocal Rank Fusion (RRF) for improved search relevance.
+- **Hybrid Search:** Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Relative Score Fusion (RSF) with alpha-weighting to heavily prioritize exact keyword matching.
 - **Interactive visualization:** Explore your document landscape through a dynamic 2D scatter plot with zooming and metadata inspection.
 - **Asynchronous pipeline:** Scalable background processing using **Celery** and **Redis** for efficient large-scale file ingestion.
 - **Automated Organization:** Delivers organized file structures back to the user as a streamed ZIP file.
@@ -62,7 +62,7 @@ This is an active prototype. Please note the following implementation details:
 │   │   ├── main.py              # FastAPI entry point
 │   │   ├── celery_app.py        # Celery configuration
 │   │   ├── tasks.py             # Background ML pipeline tasks
-│   │   ├── api/                 # API Endpoints (Upload, Search, Results)
+│   │   ├── api/                 # API Endpoints (documents.py for Upload, Search, Results)
 │   │   ├── services/
 │   │   │   ├── processing.py    # OCR, PDF/Doc parsing, Language detection
 │   │   │   ├── ml_engine.py     # Clustering, Reduction, AI Labeling
@@ -106,10 +106,20 @@ This is an active prototype. Please note the following implementation details:
    POSTGRES_DB=db
    OPENROUTER_API_KEY=your_key_here
    REDIS_URL=redis://redis:6379/0
-   INFERENCE_URL=http://inference:80
+   INFERENCE_URL=http://host.docker.internal:8081
    ```
 
-3. **Run with Docker:**
+3. **Start Local Inference Server (macOS Metal Accelerated):**
+   To leverage native Apple Silicon performance for sparse embeddings, run TEI natively via Homebrew:
+
+   ```bash
+   brew install text-embeddings-inference
+   text-embeddings-router --model-id naver/splade-cocondenser-ensembledistil --pooling splade --dtype float16 --port 8081
+   ```
+
+4. **Run Backend & Frontend:**
+   In a separate terminal, start the main application stack:
+
    ```bash
    docker-compose up --build
    ```
@@ -133,6 +143,7 @@ This is an active prototype. Please note the following implementation details:
 
 This architecture ensures **Data Minimization**:
 
-- **In-Transit:** Files are processed in volatile memory and temporary secure storage.
-- **At-Rest:** Only metadata (filenames, cluster IDs, coordinates, language) and vector embeddings are stored. **Original file contents are never persisted permanently.**
+- **In-Transit:** Files are processed in temporary secure storage. The moment AI analysis concludes, the physical raw files are purged from the local hard disk volume.
+- **At-Rest:** Only minimal metadata (filenames, cluster assignments, coordinates, derived statistics) and vector embeddings are stored in PostgreSQL.
+- **Volatile Delivery:** The resulting organized ZIP payload is cached exclusively in Redis RAM with a strict 1-hour expiration TTL, explicitly guaranteeing zero long-term data retention.
 - **Sovereignty:** Designed for OVHcloud Amsterdam/France regions to ensure no US-CLOUD Act exposure, maintaining compliance for EU public sector deployments.

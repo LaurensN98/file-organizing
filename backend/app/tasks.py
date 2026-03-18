@@ -4,6 +4,9 @@ import io
 import zipfile
 import logging
 import time
+import shutil
+import redis
+from app.core.config import settings
 from typing import List, Dict
 from app.celery_app import celery_app
 from app.services.processing import process_files
@@ -24,8 +27,7 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         batch.status = "PROCESSING"
         db.commit()
 
-        # 1. Initial Processing (Text extraction, PII scrubbing) - Now in background!
-        # This now reads files from the shared volume path if provided
+        # 1. Initial Processing (Text extraction, PII scrubbing)
         processed_data = await process_files(files_data)
 
         start_time = time.time()
@@ -40,15 +42,18 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         avg_size_kb = round(total_size_kb / total_files, 1) if total_files else 0
         unique_clusters = list(set(d["folder"] for d in organized_data))
         
-        # 3. Zip organized files in memory
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+        # 3. Zip organized files to disk
+        zip_path = f"/app/uploads/batch_{batch_id}_organized.zip"
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, False) as zip_file:
             for item in organized_data:
-                # item['content'] is already bytes
-                zip_file.writestr(f"{item['folder']}/{item['filename']}", item['content'])
+                if item.get("path"):
+                    zip_file.write(item["path"], arcname=f"{item['folder']}/{item['filename']}")
+                elif item.get("content"):
+                    zip_file.writestr(f"{item['folder']}/{item['filename']}", item["content"])
         
-        zip_buffer.seek(0)
-        zip_base64 = base64.b64encode(zip_buffer.getvalue()).decode("utf-8")
+        # Redis client to flag completion (no heavy payload)
+        redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        redis_client.setex(f"batch_zip:{batch_id}", 3600, zip_path)
         
         processing_time = round(time.time() - start_time, 2)
         
@@ -62,7 +67,7 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
             "cluster_count": len(unique_clusters),
             "description": dataset_description
         }
-        batch.zip_base64 = zip_base64
+        
         batch.status = "SUCCESS"
         
         for item in organized_data:
@@ -83,6 +88,13 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
             db.add(metadata)
         
         db.commit()
+        
+        # Clean up the raw files off the disk physically ONLY after commit succeeds
+        try:
+            shutil.rmtree(f"/app/uploads/{batch_id}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up raw files for batch {batch_id}: {e}")
+            
     except Exception as e:
         db.rollback()
         logger.error(f"Task failed for batch {batch_id}: {e}")

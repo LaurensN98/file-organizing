@@ -4,6 +4,7 @@ from app.api import documents
 from app.core.database import init_db
 from contextlib import asynccontextmanager
 import os
+from app.services.embeddings import close_http_client
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,9 +14,10 @@ async def lifespan(app: FastAPI):
     init_db()
     yield
     # Shutdown (if needed)
+    await close_http_client()
 
 app = FastAPI(
-    title="Intelligent Document Management System",
+    title="Neatly",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None
@@ -33,4 +35,4 @@ app.include_router(documents.router, prefix="/api")
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Intelligent Document Management System"}
+    return {"message": "Welcome to Neatly"}

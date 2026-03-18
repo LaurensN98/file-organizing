@@ -26,6 +26,7 @@ def extract_text_from_pdf_sync(content: bytes) -> Tuple[str, int]:
     num_pages = min(total_pages, 3)
     for i in range(num_pages):
         text += pdf_reader.pages[i].extract_text() or ""
+        
     return text, total_pages
 
 def extract_text_from_docx_sync(content: bytes) -> Tuple[str, Optional[int]]:
@@ -64,14 +65,14 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> str:
                     ]
                 }
             ],
-            max_tokens=500
+            max_tokens=1000
         )
         return response.choices[0].message.content or ""
     except Exception as e:
         print(f"OCR Error: {e}")
         return ""
 
-def _worker_analyze_text(text: str, filename: str, content: bytes, file_data: dict, page_count: Optional[int]) -> Dict:
+def _worker_analyze_text(text: str, filename: str, path: Optional[str], file_data: dict, page_count: Optional[int]) -> Dict:
     """
     Shared logic for Scrubbing and Language Detection.
     Runs in a separate thread.
@@ -89,11 +90,11 @@ def _worker_analyze_text(text: str, filename: str, content: bytes, file_data: di
             
     return {
         "filename": filename,
-        "content": content,
+        "path": path,
         "text": scrubbed_text,
         "metadata": {
-            "file_size_kb": file_data['file_size_kb'],
-            "file_type": file_data['file_type'],
+            "file_size_kb": file_data.get('file_size_kb', 0),
+            "file_type": file_data.get('file_type', 'unknown'),
             "page_count": page_count,
             "language": language
         }
@@ -104,8 +105,18 @@ def _worker_process_document_cpu(file_data: dict) -> Dict:
     Handles PDF/DOCX/Text extraction + Scrubbing + Detection.
     Runs entirely in a separate thread.
     """
-    content = file_data['content']
-    filename = file_data['filename']
+    path = file_data.get('path')
+    if path:
+        try:
+            with open(path, "rb") as f:
+                content = f.read()
+        except Exception as e:
+            logger.error(f"Failed to lazy load {path}: {e}")
+            content = b""
+    else:
+        content = file_data.get('content', b"")
+        
+    filename = file_data.get('filename', 'unnamed')
     
     text = ""
     page_count = None
@@ -114,48 +125,61 @@ def _worker_process_document_cpu(file_data: dict) -> Dict:
     if filename.lower().endswith(".pdf"):
         try:
             text, page_count = extract_text_from_pdf_sync(content)
-        except:
+        except Exception as e:
+            logger.error(f"PDF extraction error for {filename}: {e}")
             text = ""
     elif filename.lower().endswith(".docx"):
         try:
             text, page_count = extract_text_from_docx_sync(content)
-        except:
+        except Exception as e:
+            logger.error(f"DOCX extraction error for {filename}: {e}")
             text = ""
     else:
         # Plain text decoding
         try:
-            text = content.decode("utf-8")[:2000]
-        except:
+            text = content.decode("utf-8")[:4000]
+        except Exception as e:
+            logger.error(f"Text decode error for {filename}: {e}")
             text = ""
 
     # 2. Analysis (CPU Heavy)
-    return _worker_analyze_text(text, filename, content, file_data, page_count)
+    return _worker_analyze_text(text, filename, path, file_data, page_count)
 
 async def process_single_file(file_data: dict) -> Dict:
-    filename = file_data['filename']
-    content = file_data['content']
-    file_type = file_data['file_type']
+    filename = file_data.get('filename', 'unnamed')
+    file_type = file_data.get('file_type', 'unknown')
+    path = file_data.get('path')
 
-    # --- PATH A: Images (Async I/O + Threaded Analysis) ---
+    # For Images (Async I/O + Threaded Analysis)
     if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+        content = file_data.get('content')
+        if content is None and path:
+             try:
+                 def _read_file(p):
+                     with open(p, "rb") as f: return f.read()
+                 content = await asyncio.to_thread(_read_file, path)
+             except Exception as e:
+                 logger.error(f"Failed to read image {path}: {e}")
+                 content = b""
+        
         try:
             mime_type = f"image/{file_type if file_type != 'jpg' else 'jpeg'}"
             
-            # 1. AWAIT the API call (Keep this on the main loop!)
-            text = await extract_description_from_image(content, mime_type)
-        except:
+            # 1. Await the API call (Keep this on the main loop!)
+            text = await extract_description_from_image(content, mime_type) if content else ""
+        except Exception as e:
+            logger.error(f"Image vision error for {filename}: {e}")
             text = ""
             
         # 2. Offload the scrubbing/detection of the image description to a thread
         return await asyncio.to_thread(
             _worker_analyze_text, 
-            text, filename, content, file_data, None
+            text, filename, path, file_data, None
         )
 
-    # --- PATH B: Documents (Pure CPU Offload) ---
+    # For Documents (Pure CPU Offload)
     else:
-        # Offload the ENTIRE chain (Extract -> Scrub -> Detect)
-        # The main event loop is instantly free to handle the next request.
+        # Offload the entire chain (Extract -> Scrub -> Detect)
         return await asyncio.to_thread(_worker_process_document_cpu, file_data)
 
 async def process_files(files_data: List[Dict]) -> List[Dict]:
@@ -164,18 +188,9 @@ async def process_files(files_data: List[Dict]) -> List[Dict]:
     # Prepare unique names and metadata
     files_to_process = []
     
+    # If we have two files with the same name, we need to make them unique
     for file_item in files_data:
-        if "path" in file_item:
-            try:
-                with open(file_item["path"], "rb") as f:
-                    content = f.read()
-            except Exception as e:
-                logger.error(f"Failed to read file from path {file_item.get('path')}: {e}")
-                continue
-        else:
-            content = file_item["content"]
-            
-        original_filename = file_item["filename"]
+        original_filename = file_item.get("filename", "unnamed")
         base_name = original_filename.split("/")[-1].split("\\")[-1]
         
         if base_name in seen_filenames:
@@ -185,13 +200,23 @@ async def process_files(files_data: List[Dict]) -> List[Dict]:
         else:
             seen_filenames[base_name] = 0
             filename = base_name
+            
+        # Defer reading content until absolutely necessary by workers
+        file_size_kb = 0
+        if "path" in file_item:
+            try:
+                file_size_kb = os.path.getsize(file_item["path"]) // 1024
+            except Exception as e:
+                logger.error(f"Failed to get size for {file_item['path']}: {e}")
+        elif "content" in file_item:
+            file_size_kb = len(file_item["content"]) // 1024
         
-        file_size_kb = len(content) // 1024
         file_type = filename.split('.')[-1].lower() if '.' in filename else "unknown"
         
         files_to_process.append({
             "filename": filename,
-            "content": content,
+            "path": file_item.get("path"),
+            "content": file_item.get("content"),
             "file_size_kb": file_size_kb,
             "file_type": file_type
         })

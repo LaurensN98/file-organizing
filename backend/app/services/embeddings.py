@@ -23,13 +23,18 @@ def get_http_client():
         _client_http = httpx.AsyncClient(timeout=20.0)
     return _client_http
 
+async def close_http_client():
+    global _client_http
+    if _client_http is not None and not _client_http.is_closed:
+        await _client_http.aclose()
+
 MAX_CONCURRENT_SPLADE_BATCHES = 10
 splade_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPLADE_BATCHES)
 
 async def _fetch_sparse_batch(client_http: httpx.AsyncClient, batch: List[str], batch_idx: int, total_batches: int) -> List[Dict[str, float]]:
     """Helper to fetch a single sparse embedding batch with semaphore limits."""
-    # Ensure empty texts still get an embedding, returning identical shape
-    safe_batch = [t if t.strip() else "[Empty]" for t in batch]
+    # Strip and strictly truncate to 1500 characters (~300 tokens)
+    safe_batch = [t[:1500] if t.strip() else "[Empty]" for t in batch]
     
     async with splade_semaphore:
         try:
@@ -51,8 +56,8 @@ async def _fetch_sparse_batch(client_http: httpx.AsyncClient, batch: List[str], 
             logger.exception(f"SPLADE batch {batch_idx} failed or timed out")
             return [{} for _ in safe_batch]
 
-async def generate_sparse_embeddings(texts: List[str], batch_size: int = 4) -> List[Dict[str, float]]:
-    """Fetch sparse embeddings in parallel batches to avoid timeouts on CPU."""
+async def generate_sparse_embeddings(texts: List[str], batch_size: int = 32) -> List[Dict[str, float]]:
+    """Fetch sparse embeddings in parallel batches to optimize throughput on GPU/Metal."""
     if not texts:
         return []
         
@@ -87,9 +92,8 @@ async def _fetch_embedding_batch(batch: List[str], batch_idx: int) -> List[List[
         except Exception as e:
             error_details = getattr(e, "body", str(e))
             logger.error(f"Embedding error in batch {batch_idx}: {error_details}")
-            # Do not fallback to random embeddings as it poisons search and clustering.
-            # Returning an empty result will trigger errors upstream where appropriate.
-            return []
+            # Returning None entries prevents silent misalignment for downstream documents.
+            return [None] * len(batch)
 
 async def get_embeddings(texts: List[str]) -> np.ndarray:
     """Fetch embeddings from OpenRouter using Qwen model in parallel batches."""

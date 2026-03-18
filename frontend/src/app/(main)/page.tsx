@@ -22,6 +22,8 @@ export default function Home() {
               alt="galton board visualization"
               fill
               className="object-contain"
+              sizes="(max-width: 768px) 100vw, 50vw"
+              priority
             />
           </div>
           <div className="w-1/2 flex flex-col gap-4">
