@@ -13,7 +13,7 @@ export default function Navbar() {
   return (
     <div className="w-full h-20 sticky top-0 left-0 z-50 bg-white shadow-md flex items-center px-6 text-black">
       <Link href="/" className="absolute">
-        <div className="w-32">
+        <div className="w-32 select-none">
           <Image
             src="/svgs/logo.svg"
             alt="Logo"
