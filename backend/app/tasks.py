@@ -1,4 +1,5 @@
 import asyncio
+import os
 import base64
 import io
 import zipfile
@@ -55,6 +56,9 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
         redis_client.setex(f"batch_zip:{batch_id}", 3600, zip_path)
         
+        # Schedule physical file cleanup to match the 1-hour Redis TTL
+        cleanup_zip_task.apply_async((zip_path,), countdown=3600)
+        
         processing_time = round(time.time() - start_time, 2)
         
         # 4. Save Results
@@ -110,3 +114,16 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
 def process_upload_task(batch_id: str, files_data: List[Dict]):
     """ Celery task wrapper to run the async pipeline. """
     asyncio.run(run_processing_pipeline(batch_id, files_data))
+
+@celery_app.task(name="cleanup_zip_task")
+def cleanup_zip_task(zip_path: str):
+    """ Deletes a ZIP result file from disk after use or TTL. """
+    try:
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+            logger.info(f"Successfully cleaned up expired ZIP result: {zip_path}")
+        else:
+            logger.warning(f"Cleanup task found no file at: {zip_path}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup ZIP result {zip_path}: {e}")
+
