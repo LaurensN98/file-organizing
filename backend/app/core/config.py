@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = "dummy"
     INFERENCE_URL: str = "http://inference:80"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = {
+        "env_file": ".env",
+        "extra": "ignore"
+    }
 
 settings = Settings()

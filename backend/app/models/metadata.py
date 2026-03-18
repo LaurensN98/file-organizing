@@ -1,9 +1,8 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
-from sqlalchemy.ext.declarative import declarative_base
 import datetime
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import declarative_base, relationship
 from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
