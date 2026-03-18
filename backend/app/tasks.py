@@ -24,16 +24,14 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         batch.status = "PROCESSING"
         db.commit()
 
-        # Decode base64 contents back to bytes for processing
-        for item in files_data:
-            if isinstance(item.get("content"), str):
-                item["content"] = base64.b64decode(item["content"])
+        # 1. Initial Processing (Text extraction, PII scrubbing) - Now in background!
+        # This now reads files from the shared volume path if provided
+        processed_data = await process_files(files_data)
 
         start_time = time.time()
         
-        # 1. ML Pipeline: Embed, Reduce, Cluster, Label
-        # files_data already contains the 'content' and 'filename'
-        organized_data, dataset_description = await clustering_pipeline(files_data)
+        # 2. ML Pipeline: Embed, Reduce, Cluster, Label
+        organized_data, dataset_description = await clustering_pipeline(processed_data)
         
         # 2. Calculate Stats
         total_files = len(organized_data)
