@@ -26,17 +26,14 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      - QDRANT_HOST=vector_db
-      - INFERENCE_URL=http://inference:7997/v1
+      - INFERENCE_URL=http://inference:80
       - NUMBA_CACHE_DIR=/tmp
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-      celery_worker:
-        condition: service_started
-      vector_db:
+      inference:
         condition: service_healthy
     restart: on-failure
     healthcheck:
@@ -48,21 +45,23 @@ services:
       - "8000:8000"
 
   db:
-    image: postgres:15-alpine
+    image: timescale/timescaledb-ha:pg16
     networks:
       - ai_network
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    ports:
+      - "5433:5432"
 
   redis:
     image: redis:7-alpine
@@ -93,40 +92,36 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      vector_db:
+      inference:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping || exit 1"]
+      test: ["CMD-SHELL", "celery -A app.celery_app inspect pink || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
 
-  vector_db:
-    image: qdrant/qdrant
+  inference:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    platform: linux/x86_64
+    command: --model-id naver/splade-cocondenser-ensembledistil --pooling splade
+    ports:
+      - "8081:80"
     networks:
       - ai_network
-    restart: always
     volumes:
-      - vector_db_data:/qdrant/storage
-    ports:
-      - "6333:6333"
+      - ./model_cache:/data
     healthcheck:
-      # This checks if the port is open at the network level
-      test: ["CMD", "printf", "", ">", "/dev/tcp/127.0.0.1/6333"]
-      interval: 5s
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
-    deploy:
-      resources:
-        limits:
-          memory: 2G
+      retries: 10
+      start_period: 60s
 
 volumes:
   postgres_data:
-  vector_db_data:
   file_uploads:
+  model_cache:
 
 networks:
   ai_network:

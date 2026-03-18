@@ -78,7 +78,9 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
                 page_count=meta.get("page_count"),
                 language=meta.get("language", "en"),
                 x_coord=item.get("x"),
-                y_coord=item.get("y")
+                y_coord=item.get("y"),
+                dense_embedding=item.get("dense_embedding"),
+                sparse_embedding=item.get("sparse_embedding")
             )
             db.add(metadata)
         
