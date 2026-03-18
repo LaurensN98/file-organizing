@@ -78,7 +78,6 @@ This is an active prototype. Please note the following implementation details:
 │   ├── Dockerfile
 │   └── package.json
 ├── docker-compose.yml           # Full multi-container orchestrator
-└── model_cache/                 # Local cache for TEI models
 ```
 
 ## Getting Started
@@ -141,9 +140,9 @@ This is an active prototype. Please note the following implementation details:
 
 ## GDPR & Security Compliance
 
-This architecture ensures **Data Minimization**:
+This architecture ensures **Data Minimization** through a multi-stage security pipeline:
 
-- **In-Transit:** Files are processed in temporary secure storage. The moment AI analysis concludes, the physical raw files are purged from the local hard disk volume.
-- **At-Rest:** Only minimal metadata (filenames, cluster assignments, coordinates, derived statistics) and vector embeddings are stored in PostgreSQL.
-- **Volatile Delivery:** The resulting organized ZIP payload is cached exclusively in Redis RAM with a strict 1-hour expiration TTL, explicitly guaranteeing zero long-term data retention.
-- **Sovereignty:** Designed for OVHcloud Amsterdam/France regions to ensure no US-CLOUD Act exposure, maintaining compliance for EU public sector deployments.
+- **In-Transit:** Files are processed in temporary secure storage. The moment AI analysis concludes, the raw upload directories are purged from the local hard disk volume.
+- **At-Rest:** Only minimal metadata (filenames, cluster assignments, coordinates, statistics) and vector embeddings are stored in PostgreSQL. Raw document text is never persisted in the database.
+- **Volatile Delivery:** Organized ZIP results are stored on a temporary volume with a strict 1-hour lifecycle. An automated Celery cleanup task physically deletes these archives when the Redis access token expires, guaranteeing zero long-term data retention.
+- **Cloud Sovereignty:** While the platform is **designed for** OVHcloud (EU) to eliminate US-CLOUD Act exposure, current local prototypes utilize a hybrid model (Local SPLADE + External LLMs via OpenRouter). Production-grade compliance for EU public sector deployments requires switching to fully sovereign EU endpoints (e.g., Mistral via OVH AI).
