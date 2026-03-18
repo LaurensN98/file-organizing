@@ -36,7 +36,9 @@ RUN apt-get update && apt-get install -y \
     libpq5 \
     curl \
     && rm -rf /var/lib/apt/lists/* && \
-    chown python:python /app
+    mkdir -p /app/uploads && \
+    chown -R python:python /app
+
 
 # 3. Copy installed packages from builder
 COPY --from=builder /root/.local /home/python/.local
