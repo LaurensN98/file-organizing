@@ -18,7 +18,7 @@ export default function Home() {
         <div className="flex justify-between">
           <div className="w-1/2 -ml-14 -mb-1 relative overflow-hidden">
             <Image
-              src="/svgs/homepage_visualization.svg"
+              src="/images/galton-visualization.png"
               alt="galton board visualization"
               fill
               className="object-contain"
