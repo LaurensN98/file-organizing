@@ -1,62 +1,22 @@
 import os
 import logging
 import warnings
-import asyncio
 import time
 import numpy as np
 import umap
 from sklearn.cluster import HDBSCAN
-from openai import AsyncOpenAI
+import base64
+import asyncio
 from typing import List, Dict, Tuple, Any
-
 from app.core.config import settings
+from app.services.openai_client import client
+from app.services.embeddings import get_embeddings, generate_sparse_embeddings
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Suppress UMAP UserWarnings
 warnings.filterwarnings("ignore", category=UserWarning, module="umap")
-
-# Initialize client for OpenRouter 
-# Adding headers can help with certain 401 "User not found" edge cases on OpenRouter
-client = AsyncOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=settings.OPENROUTER_API_KEY,
-    default_headers={
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "Neatly AI Organizer",
-    }
-)
-
-async def get_embeddings(texts: List[str]) -> np.ndarray:
-    """Fetch embeddings from OpenRouter using Qwen model in parallel batches."""
-    if not texts:
-        return np.array([])
-    
-    batch_size = 50 
-    
-    async def fetch_batch(batch: List[str], batch_idx: int):
-        try:
-            response = await client.embeddings.create(
-                input=batch,
-                model="qwen/qwen3-embedding-8b"
-            )
-            return [data.embedding for data in response.data]
-        except Exception as e:
-            error_details = getattr(e, "body", str(e))
-            logger.error(f"Embedding error in batch {batch_idx}: {error_details}")
-            # Fallback to random embeddings to prevent total pipeline failure
-            return [np.random.rand(1536).tolist() for _ in range(len(batch))]
-
-    tasks = []
-    for i in range(0, len(texts), batch_size):
-        tasks.append(fetch_batch(texts[i:i + batch_size], i // batch_size))
-    
-    results = await asyncio.gather(*tasks)
-    
-    # Flatten the results
-    all_embeddings = [emb for batch_result in results for emb in batch_result]
-    return np.array(all_embeddings)
 
 def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -110,15 +70,16 @@ def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.n
     return cluster_labels, embeddings_for_viz
 
 async def get_cluster_label(texts: List[str]) -> str:
-    """Generate a concise folder name using Google Gemini via OpenRouter."""
+    """Generate a concise folder name using MiMo v2 Flash via OpenRouter."""
     # Filter for quality text snippets to send to the LLM
     clean_texts = [t.strip() for t in texts if len(t.strip()) > 20]
     if not clean_texts:
         return "Miscellaneous"
 
     prompt = (
-        "Analyze these document excerpts and provide a single, concise folder name (1-3 words) "
-        "that accurately describes the collection. Avoid generic words like 'Documents' or 'Files'.\n\n"
+        "Analyze these document excerpts and provide ONLY a single, concise folder name (1-3 words) "
+        "that accurately describes the collection. Do not return JSON. Do not return markdown. "
+        "Do not explain. Return ONLY the title.\n\n"
         "Examples: 'Financial Reports', 'Legal Contracts', 'Resume Applications', 'Product Manuals'.\n\n"
         "Document Excerpts:\n"
     )
@@ -128,7 +89,7 @@ async def get_cluster_label(texts: List[str]) -> str:
     try:
         logger.info(f"Generating label for cluster with {len(clean_texts)} documents...")
         response = await client.chat.completions.create(
-            model="qwen/qwen3.5-27b", 
+            model="xiaomi/mimo-v2-flash", 
             messages=[
                 {"role": "user", "content": prompt}
             ],
@@ -137,8 +98,24 @@ async def get_cluster_label(texts: List[str]) -> str:
         )
         content = response.choices[0].message.content
         if content:
-            # Clean up markdown and quotes
-            return content.strip().replace('"', '').replace('*', '').replace('_', '').replace('#', '')
+            logger.info(f"Raw Label result: {content[:100]}...")
+            
+            # Fallback: model might return JSON like {'folder_name': '...'}
+            if content.strip().startswith("{") and "folder_name" in content:
+                try:
+                    import json
+                    data = json.loads(content)
+                    content = data.get("folder_name", content)
+                except:
+                    pass
+
+            # Clean up markdown, quotes, and common JSON artifacts
+            clean_content = content.strip().replace('"', '').replace("'", "").replace('{', '').replace('}', '').replace('*', '').replace('_', '').replace('#', '')
+            if ":" in clean_content and len(clean_content.split(":")) > 1:
+                # Handle cases like "Folder: Name"
+                clean_content = clean_content.split(":")[-1].strip()
+                
+            return clean_content
         return "Miscellaneous"
     except Exception as e:
         logger.error(f"Labeling error: {e}")
@@ -161,13 +138,16 @@ async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
     )
 
     try:
+        logger.info("Generating dataset summary...")
         response = await client.chat.completions.create(
-            model="qwen/qwen3.5-27b",
+            model="xiaomi/mimo-v2-flash",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=250
         )
         content = response.choices[0].message.content
-        return content.strip() if content else "An organized collection of documents."
+        if content:
+            return content.strip()
+        return "An organized collection of documents."
     except Exception as e:
         logger.error(f"Summary generation error: {e}")
         return "An organized collection of documents."
@@ -180,14 +160,14 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
     if not processed_data:
         return [], "No data."
 
-    texts = [d["text"] for d in processed_data if d["text"].strip()]
+    # Combine filename and text for maximum signal in both clustering and search
+    texts = [f"{d['filename']} | {d.get('text') or ''}".strip() for d in processed_data]
     n_samples = len(texts)
-    logger.info(f"Number of samples: {n_samples}")
+    logger.info(f"Number of samples for ML processing: {n_samples}")
 
+    # For tiny datasets, we still want to proceed to get embeddings, but clustering will be trivial
     if n_samples < 2:
-        for d in processed_data:
-            d["folder"] = "Misc"
-        return processed_data, "A collection of documents."
+        logger.info("Tiny dataset detected, skipping complex clustering.")
 
     # 1. Embeddings (I/O Bound - Async)
     t0 = time.time()
@@ -232,11 +212,25 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
     
     # Fire Labeling AND Summary together
     all_ai_tasks = label_tasks + [generate_dataset_summary(summary_sampling_data)]
-    raw_results = await asyncio.gather(*all_ai_tasks)
+    raw_results = await asyncio.gather(*all_ai_tasks, return_exceptions=True)
     
-    # Casting/Slicing with explicit typing to satisfy static analysis
-    dataset_summary: str = str(raw_results[-1]) if raw_results else "A collection of documents."
-    labels: List[str] = [str(r) for r in raw_results[:-1]]
+    # Check for exceptions in gather
+    cleaned_results: List[Any] = []
+    # Use a copy to avoid slicing issues if needed, or just index safely
+    for r in list(raw_results):
+        if isinstance(r, Exception):
+            logger.error(f"AI Task failed: {r}")
+            cleaned_results.append("Miscellaneous Error")
+        else:
+            cleaned_results.append(r)
+    
+    # Ensure dataset_summary is a string for logging
+    final_summary = str(cleaned_results[-1]) if len(cleaned_results) > 0 else "No summary."
+    dataset_summary: str = final_summary
+    # Labels represent all results except the last one (summary)
+    labels: List[str] = [str(r) for idx, r in enumerate(cleaned_results) if idx < len(cleaned_results) - 1]
+    
+    logger.info(f"Summary result: {final_summary[:100]}...")
     
     for cid, label in zip(cluster_ids_for_tasks, labels):
         cluster_names[cid] = label
@@ -260,10 +254,21 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
             # Dummy coords for tiny datasets to prevent UI crash
             text_to_coords[text] = {"x": float(i), "y": float(i)}
 
-    for d in processed_data:
-        d["folder"] = text_to_folder.get(d["text"], "Misc")
-        coords = text_to_coords.get(d["text"], {"x": 0.0, "y": 0.0})
+    # Generate sparse embeddings in batches to avoid timeouts on CPU
+    logger.info(f"Generating sparse embeddings for {n_samples} documents...")
+    all_sparse_embeddings = await generate_sparse_embeddings(texts, batch_size=4)
+    logger.info(f"Sparse embeddings successfully generated.")
+
+    # Final mapping of results (folders, coords, embeddings) to processed_data
+    for i, d in enumerate(processed_data):
+        combined_text = texts[i]
+        d["folder"] = text_to_folder.get(combined_text, "Misc")
+        coords = text_to_coords.get(combined_text, {"x": 0.0, "y": 0.0})
         d["x"] = coords["x"]
         d["y"] = coords["y"]
+        
+        # Store both dense and sparse embeddings for persistence 
+        d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
+        d["sparse_embedding"] = all_sparse_embeddings[i]
         
     return processed_data, dataset_summary
