@@ -26,14 +26,12 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      - INFERENCE_URL=http://inference:80
+      - INFERENCE_URL=http://host.docker.internal:8081
       - NUMBA_CACHE_DIR=/tmp
     depends_on:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      inference:
         condition: service_healthy
     restart: on-failure
     healthcheck:
@@ -92,8 +90,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      inference:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.celery_app inspect ping || exit 1"]
       interval: 30s
@@ -101,27 +97,9 @@ services:
       retries: 5
       start_period: 30s
 
-  inference:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
-    platform: linux/x86_64
-    command: --model-id naver/splade-cocondenser-ensembledistil --pooling splade
-    ports:
-      - "8081:80"
-    networks:
-      - ai_network
-    volumes:
-      - ./model_cache:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-
 volumes:
   postgres_data:
   file_uploads:
-  model_cache:
 
 networks:
   ai_network:
