@@ -10,7 +10,7 @@ engine = create_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
-    # 1. Enable Extensions (Must happen before table creation)
+    # 1. Enable Extensions 
     with engine.connect() as conn:
         logger.info("Enabling vector extensions...")
         try:
