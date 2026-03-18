@@ -1,6 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
-import Page from "../app/page";
+import { expect, test, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/",
+}));
+
+import Page from "../app/(main)/page";
 
 test("Home page renders welcome message", () => {
   render(<Page />);
