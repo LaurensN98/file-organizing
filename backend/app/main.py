@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import upload
+from app.api import documents
 from app.core.database import init_db
 from contextlib import asynccontextmanager
 import os
@@ -29,7 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(upload.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")
 
 @app.get("/")
 async def root():
