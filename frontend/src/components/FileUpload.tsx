@@ -4,51 +4,57 @@ import React, { useState } from "react";
 import Image from "next/image";
 import axios from "axios";
 import { clsx } from "clsx";
+import { useRouter } from "next/navigation";
 import { FileText, Loader2, FolderInput } from "lucide-react";
-import ResultsView, {
-  AnalysisItem,
-  SummaryData,
-} from "@/components/ResultsView";
 
 export default function FileUpload() {
+  const router = useRouter();
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [analysisData, setAnalysisData] = useState<AnalysisItem[] | null>(null);
-  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
-  const [zipBase64, setZipBase64] = useState<string>("");
   const [consent, setConsent] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  // Helper to filter out system files
+  const isSystemFile = (filename: string) => {
+    return filename.includes(".DS_Store") || 
+           filename.includes("__MACOSX") || 
+           filename.startsWith(".");
+  };
 
   const handleUpload = async () => {
     if (files.length === 0 || !consent) return;
 
     setIsUploading(true);
+    console.log(`🚀 Starting upload of ${files.length} files...`);
+    
     const formData = new FormData();
     files.forEach((file) => {
-      formData.append("files", file, file.webkitRelativePath || file.name);
+      // Use webkitRelativePath if available, otherwise just the name
+      const path = file.webkitRelativePath || file.name;
+      formData.append("files", file, path);
     });
 
     try {
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/upload`,
-        formData,
-      );
-      // Store analysis, summary, and zip
-      setAnalysisData(response.data.analysis);
-      setSummaryData(response.data.summary);
-      setZipBase64(response.data.zip_file);
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await axios.post(`${apiUrl}/api/upload`, formData);
+      
+      console.log("✅ Upload successful! Batch ID:", response.data.batch_id);
+      
+      // Navigate to the dynamic persistent results page
+      router.push(`/result/${response.data.batch_id}`);
     } catch (error) {
-      console.error("Upload failed", error);
-      alert("Something went wrong. Please check your connection.");
-    } finally {
+      console.error("❌ Upload failed", error);
+      alert("Something went wrong with the upload. Please check your connection or try fewer files.");
       setIsUploading(false);
     }
   };
 
   const addFiles = (newFiles: FileList | null) => {
-    if (newFiles) {
-      setFiles((prev) => [...prev, ...Array.from(newFiles)]);
-    }
+    if (!newFiles) return;
+    
+    const validFiles = Array.from(newFiles).filter(f => !isSystemFile(f.name));
+    console.log(`Staging ${validFiles.length} files from input...`);
+    setFiles((prev) => [...prev, ...validFiles]);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -69,58 +75,52 @@ export default function FileUpload() {
     const items = e.dataTransfer.items;
     if (!items) return;
 
+    console.log("📂 processing drop...");
     const fileEntries: File[] = [];
-    const queue: FileSystemEntry[] = [];
 
-    for (let i = 0; i < items.length; i++) {
-      const entry = items[i].webkitGetAsEntry();
-      if (entry) queue.push(entry);
-    }
-
-    const processEntry = async (entry: FileSystemEntry): Promise<void> => {
+    // Recursive function to correctly read all files in all subdirectories
+    const readAllFiles = async (entry: FileSystemEntry, path: string = ""): Promise<void> => {
       if (entry.isFile) {
         const file = await new Promise<File>((resolve) =>
           (entry as FileSystemFileEntry).file(resolve),
         );
-        fileEntries.push(file);
+        
+        if (!isSystemFile(file.name)) {
+          fileEntries.push(file);
+        }
       } else if (entry.isDirectory) {
         const reader = (entry as FileSystemDirectoryEntry).createReader();
-        const entries = await new Promise<FileSystemEntry[]>((resolve) =>
-          reader.readEntries(resolve),
-        );
-        for (const child of entries) {
-          await processEntry(child);
+        
+        const readEntries = async (): Promise<FileSystemEntry[]> => {
+          return new Promise((resolve) => {
+            reader.readEntries(resolve);
+          });
+        };
+
+        let entries = await readEntries();
+        while (entries.length > 0) {
+          for (const child of entries) {
+            await readAllFiles(child, `${path}${entry.name}/`);
+          }
+          entries = await readEntries();
         }
       }
     };
 
-    for (const entry of queue) {
-      await processEntry(entry);
+    const tasks: Promise<void>[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry();
+      if (entry) {
+        tasks.push(readAllFiles(entry));
+      }
     }
 
+    await Promise.all(tasks);
+    console.log(`Staged ${fileEntries.length} files from drop.`);
     if (fileEntries.length > 0) {
       setFiles((prev) => [...prev, ...fileEntries]);
     }
   };
-
-  const handleReset = () => {
-    setFiles([]);
-    setAnalysisData(null);
-    setSummaryData(null);
-    setZipBase64("");
-    setConsent(false);
-  };
-
-  if (analysisData) {
-    return (
-      <ResultsView
-        analysis={analysisData}
-        summary={summaryData || undefined}
-        zipBase64={zipBase64}
-        onReset={handleReset}
-      />
-    );
-  }
 
   return (
     <div className=" flex flex-col gap-4">
@@ -145,10 +145,9 @@ export default function FileUpload() {
           type="file"
           className="hidden"
           id="folder-upload"
-          {...({
-            webkitdirectory: "",
-            directory: "",
-          } as React.InputHTMLAttributes<HTMLInputElement>)}
+          // @ts-expect-error - directory and webkitdirectory are standard but sometimes miss types
+          webkitdirectory=""
+          directory=""
           onChange={(e) => addFiles(e.target.files)}
         />
 
@@ -189,30 +188,40 @@ export default function FileUpload() {
           </div>
 
           {files.length > 0 && (
-            <div className="mt-2 flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-full text-xs font-bold shadow-md animate-in fade-in zoom-in-95">
-              <FileText size={14} />
-              {files.length} items staged
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-full text-[10px] font-bold shadow-md">
+                <FileText size={12} />
+                {files.length} ITEMS READY
+              </div>
+              <button 
+                onClick={() => setFiles([])}
+                className="text-[10px] text-gray-400 hover:text-red-500 font-bold uppercase tracking-wider transition-colors"
+                type="button"
+              >
+                Clear all
+              </button>
             </div>
           )}
         </div>
       </div>
+      
       <div className="flex items-start gap-3">
         <input
           type="checkbox"
           id="consent"
-          className="mt-0.5 rounded border-white/20 bg-white/5 text-white focus:ring-white/30 accent-white"
+          className="mt-0.5 rounded border-gray-300 text-[#4A80A6] focus:ring-[#4A80A6]"
           checked={consent}
           onChange={(e) => setConsent(e.target.checked)}
         />
         <label
           htmlFor="consent"
-          className="text-[11px] leading-relaxed cursor-pointer select-none"
+          className="text-[11px] leading-relaxed cursor-pointer select-none text-gray-600"
         >
           I have read and agree to the{" "}
           <a
             href="/privacy"
             target="_blank"
-            className="underline hover:text-white font-bold transition-colors"
+            className="underline hover:text-[#4A80A6] font-bold transition-colors text-gray-900"
           >
             Privacy Policy
           </a>
@@ -220,23 +229,25 @@ export default function FileUpload() {
           hosted in the EU.
         </label>
       </div>
+
       <button
         onClick={handleUpload}
         disabled={files.length === 0 || !consent || isUploading}
+        type="button"
         className={clsx(
           "w-full h-12 rounded-2xl text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-300",
           isUploading || files.length === 0 || !consent
-            ? "bg-[#4A80A6]/10 text-[#4A80A6]/10 cursor-not-allowed border border-white/5"
-            : "bg-[#4A80A6] text-white hover:bg-[#4A80A6]/80 active:scale-[0.98] shadow-[0_0_20px_rgba(255,255,255,0.3)]",
+            ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+            : "bg-[#4A80A6] text-white hover:bg-[#3A7096] active:scale-[0.98] shadow-lg shadow-[#4A80A6]/20",
         )}
       >
         {isUploading ? (
           <>
             <Loader2 size={18} className="animate-spin" />
-            Processing
+            Organizing...
           </>
         ) : (
-          "Organize Files"
+          "Start Organization"
         )}
       </button>
     </div>
