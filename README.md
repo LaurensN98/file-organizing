@@ -1,96 +1,92 @@
-# Intelligent Document Management System
+# Neatly | Smart File Organization
 
 ## Project Overview
 
-This project is an Intelligent Document Organization Endpoint designed to analyze unstructured folders, classify documents using unsupervised machine learning, and provide actionable insights.
+**Neatly** is an Intelligent Document Organization & Search platform designed to analyze unstructured file collections, automatically classify documents using unsupervised machine learning, and provide high-accuracy discovery with a **Hybrid Search** algorithm.
 
-It is architected with a "Privacy by Design" philosophy, utilizing Zero Data Retention (ZDR) principles and EU-Sovereign infrastructure patterns suitable for Dutch public sector clients.
+## Key Features
+
+- **AI-Powered Labeling:** Automatically generates semantic folder names and dataset summaries using LLMs (MiMo v2 Flash).
+- **Unsupervised Clustering:** Uses **UMAP** for dimensionality reduction and **HDBSCAN** for high-accuracy density-based document grouping.
+- **Hybrid Search:** Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Reciprocal Rank Fusion (RRF) for improved search relevance.
+- **Interactive visualization:** Explore your document landscape through a dynamic 2D scatter plot with zooming and metadata inspection.
+- **Asynchronous pipeline:** Scalable background processing using **Celery** and **Redis** for efficient large-scale file ingestion.
+- **Automated Organization:** Delivers organized file structures back to the user as a streamed ZIP file.
+
+## Supported File Types
+
+The processing engine currently supports the following document and image formats:
+
+- **Documents:** PDF (`.pdf`), Word (`.docx`), and Plain Text (`.txt`).
+- **Images (OCR):** PNG, JPG, JPEG, and WebP.
+- **Scalability:** Large documents are sampled (first few pages/paragraphs) to ensure rapid response times during clustering.
+
+## Implementation Status & Limitations
+
+This is an active prototype. Please note the following implementation details:
+
+- **Frontend Navigation:** The sidebar navigation links and footer options are currently placeholders and not fully functional.
+- **Search:** The Hybrid Search is fully functional and optimized for the current schema.
+- **PII Redaction:** The production-grade PII scrubbing hook is currently a placeholder (scrubs basic patterns) and should be replaced with a service like Microsoft Presidio for enterprise use.
 
 ## System Architecture
 
 ### High-Level Data Flow
 
-1. **Upload:** User uploads multiple files or folders via Next.js Frontend (drag-and-drop).
-2. **Ingestion & Parallel Processing:** FastAPI receives files -> Processes images (OCR), PDFs, and Docs concurrently using `asyncio`.
-3. **Processing (ML Pipeline):**
-   - **OCR:** Images are described using Multimodal LLM (Gemini Flash via OpenRouter).
-   - **Embed:** External Embedding API (Qwen via OpenRouter/Nebius) via standard HTTPS requests.
-   - **Reduce:** UMAP (5D for clustering, 2D for visualization).
-   - **Cluster:** HDBSCAN (Density-based clustering).
-   - **Label:** LLM (Google Gemini via OpenRouter) generates concise folder names based on cluster centroids.
-4. **Output A (Interactive Map):** A semantic 2D scatter plot visualizes the document landscape with zooming and metadata inspection.
-5. **Output B (Stream):** Organized files are zipped in RAM and streamed back to the user immediately.
-6. **Output C (Insight):** Enhanced metadata (language, file size, cluster) is stored in PostgreSQL.
+1. **Ingestion:** Files are uploaded via the **Next.js 15** frontend and initially processed by **FastAPI**.
+2. **Asynchronous Task:** Ingestion triggers a **Celery** background worker to handle the heavy lifting:
+   - **OCR & Extraction:** Processes images (OCR), PDFs, and Word docs into clean text snippets.
+   - **Multi-Vector Embedding:**
+     - **Dense:** Generates semantic embeddings via OpenRouter (Qwen).
+     - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
+   - **Clustering:** Reduces dimensions with UMAP and groups documents with HDBSCAN.
+   - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
+3. **Storage:** Metadata and vectors are stored in **TimescaleDB (PostgreSQL)** using `pgvector` and `pgvectorscale`.
+4. **Discovery:** Users can perform **Hybrid Search** across the processed dataset or explore the interactive 2D map.
 
 ### Tech Stack
 
-- **Frontend:** Next.js 16 (App Router), React 19, TailwindCSS, Recharts.
-- **Backend:** FastAPI (Python 3.11), AsyncOpenAI.
-- **ML & Data:** umap-learn, hdbscan, scikit-learn, langdetect.
-- **Database:** PostgreSQL (Metadata storage).
-- **Async/Queue:** Redis & Celery (Background metadata processing).
-- **Infrastructure:** Docker & Docker Compose.
+- **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS, Framer Motion, Recharts.
+- **Backend:** FastAPI (Python 3.11), Celery, SQLAlchemy.
+- **Inference Service:** HuggingFace Text Embeddings Inference (TEI) running SPLADE (naver/splade-cocondenser-ensembledistil).
+- **Machine Learning:** UMAP-learn, HDBSCAN, Scikit-learn, LangDetect.
+- **Database:** TimescaleDB (PostgreSQL 16) with `pgvector` and `pgvectorscale` for vector similarity search.
+- **Infrastructure:** Docker & Docker Compose, Redis (Task Queue), GitHub Actions (CI/CD).
 
-### 1. Directory Structure
+## Directory Structure
 
-The project follows this structure:
-
-```
+```text
 .
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # FastAPI entry point
-│   │   ├── api/                 # Endpoints
-│   │   ├── core/                # Config & Security
+│   │   ├── celery_app.py        # Celery configuration
+│   │   ├── tasks.py             # Background ML pipeline tasks
+│   │   ├── api/                 # API Endpoints (Upload, Search, Results)
 │   │   ├── services/
-│   │   │   ├── processing.py    # File reading, OCR, LangDetect
-│   │   │   ├── ml_engine.py     # Embeddings, UMAP, HDBSCAN, LLM Labeling
-│   │   │   └── privacy.py       # PII Scrubbing hooks
-│   │   └── models/              # Pydantic & SQLAlchemy models
+│   │   │   ├── processing.py    # OCR, PDF/Doc parsing, Language detection
+│   │   │   ├── ml_engine.py     # Clustering, Reduction, AI Labeling
+│   │   │   └── embeddings.py    # Dense & Sparse embedding clients
+│   │   └── models/              # Pydantic & SQLAlchemy schema definitions
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── app/                 # Next.js Pages
-│   │   ├── components/
-│   │   │   └── ResultsView.tsx  # Interactive Scatter Plot
+│   │   ├── app/                 # Next.js Pages & Layouts
+│   │   ├── components/          # UI Components (ResultView, UploadZone)
+│   │   └── lib/                 # API Clients & Utilities
 │   ├── Dockerfile
 │   └── package.json
-└── docker-compose.yml
+├── docker-compose.yml           # Full multi-container orchestrator
+└── model_cache/                 # Local cache for TEI models
 ```
-
-## Production Readiness Matrix
-
-A comparison between this demonstration implementation and the target production architecture.
-
-| Feature              | Demo Implementation (Local)      | Production Standard (Target)                |
-| :------------------- | :------------------------------- | :------------------------------------------ |
-| **Hosting**          | Local Docker Compose             | OVHcloud (Amsterdam/France regions)         |
-| **Embeddings & LLM** | OpenRouter (Qwen / Gemini)       | Mistral via OVH AI Endpoints (EU Sovereign) |
-| **Data Privacy**     | In-Memory Processing (RAM)       | Zero Data Retention (ZDR) + Signed DPA      |
-| **Security**         | HTTP (Localhost)                 | HTTPS (TLS 1.3) + Private VPC               |
-| **PII Handling**     | `scrub_pii()` hook (Placeholder) | Microsoft Presidio (Automated Redaction)    |
-| **Concurrency**      | AsyncIO + BackgroundTasks        | Celery Workers + Redis Cluster              |
-
-## Production Improvements
-
-To transition from this prototype to a production-grade enterprise solution, the following enhancements are recommended:
-
-- **EU Hosting & Sovereign AI:** Deploy exclusively on EU-based cloud providers (e.g., OVHcloud, Scaleway) and use EU-hosted LLM endpoints to ensure immunity from the US CLOUD Act.
-- **Private VPC:** Isolate the infrastructure within a Virtual Private Cloud (VPC) with strict firewall rules, ensuring no public internet access to the database or internal services.
-- **Encrypted Object Store:** Replace in-memory processing with a secure, S3-compatible object store (e.g., MinIO) featuring server-side encryption (SSE) for temporary file handling.
-- **DPA Agreements:** Establish formal Data Processing Agreements (DPAs) with all third-party AI subprocessors to legally guarantee data privacy and usage limitations.
-- **AI Rate Limiting:** Implement robust rate limiting and circuit breakers on LLM API calls to prevent cost overruns and ensure service stability during high load.
-- **HTTPS/SSL:** Enforce end-to-end encryption using TLS 1.3 with valid SSL certificates (e.g., via Let's Encrypt or a managed load balancer).
-- **Celery & Redis Cluster:** Scale background processing by deploying multiple Celery workers across nodes and using a high-availability Redis cluster for the task queue.
-- **Advanced PII Redaction:** Integrate enterprise-grade PII detection (like Microsoft Presidio) to automatically redact sensitive information (names, SSNs) before sending text to AI models.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Docker & Docker Compose
-- API Key (OpenRouter) compatible with Qwen and Gemini endpoints.
+- OpenRouter API Key (for LLM and Dense Embeddings)
 
 ### Installation
 
@@ -98,16 +94,19 @@ To transition from this prototype to a production-grade enterprise solution, the
 
    ```bash
    git clone https://github.com/LaurensN98/file-organizing.git
-   cd file-organization
+   cd file-organizing
    ```
 
 2. **Environment Setup:**
    Create a `.env` file in `./backend`:
 
    ```env
-   DATABASE_URL=postgresql://user:password@db:5432/db
-   REDIS_URL=redis://redis:6379/0
+   POSTGRES_USER=neatly_admin
+   POSTGRES_PASSWORD=your_secure_password
+   POSTGRES_DB=db
    OPENROUTER_API_KEY=your_key_here
+   REDIS_URL=redis://redis:6379/0
+   INFERENCE_URL=http://inference:80
    ```
 
 3. **Run with Docker:**
@@ -119,10 +118,21 @@ To transition from this prototype to a production-grade enterprise solution, the
 
 - **Frontend:** [http://localhost:3000](http://localhost:3000)
 
+## Production Readiness Matrix
+
+| Feature              | Current Demo (Local)            | Production Standard (Target)                |
+| :------------------- | :------------------------------ | :------------------------------------------ |
+| **Hosting**          | Local Docker Compose            | OVHcloud (Amsterdam/France regions)         |
+| **Embeddings & LLM** | OpenRouter + Local TEI (SPLADE) | Mistral via OVH AI Endpoints (EU Sovereign) |
+| **Search Engine**    | Hybrid (Postgres + DiskANN)     | Scaled HA Cluster / Managed Timescale       |
+| **Data Privacy**     | In-Memory + Metadata Storage    | Zero Data Retention (ZDR) + Signed DPA      |
+| **Security**         | Internal AI Network             | HTTPS (TLS 1.3) + Private VPC               |
+| **PII Handling**     | Placeholder Redaction           | Microsoft Presidio (Automated Redaction)    |
+
 ## GDPR & Security Compliance
 
 This architecture ensures **Data Minimization**:
 
-- **In-Transit:** Files are processed in volatile memory.
-- **At-Rest:** Only metadata (filenames, cluster IDs, coordinates, language) is stored in Postgres. File content is never persisted.
-- **Sovereignty:** Designed for OVHcloud Amsterdam/France regions to ensure no US-CLOUD Act exposure.
+- **In-Transit:** Files are processed in volatile memory and temporary secure storage.
+- **At-Rest:** Only metadata (filenames, cluster IDs, coordinates, language) and vector embeddings are stored. **Original file contents are never persisted permanently.**
+- **Sovereignty:** Designed for OVHcloud Amsterdam/France regions to ensure no US-CLOUD Act exposure, maintaining compliance for EU public sector deployments.
