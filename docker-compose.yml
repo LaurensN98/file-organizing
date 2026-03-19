@@ -24,7 +24,7 @@ services:
       - ./backend:/app
       - file_uploads:/app/uploads
     env_file:
-      - ./backend/.env
+      - .env
     environment:
       - QDRANT_HOST=vector_db
       - INFERENCE_URL=http://inference:7997/v1
@@ -51,10 +51,8 @@ services:
     image: postgres:15-alpine
     networks:
       - ai_network
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: db
+    env_file:
+      - .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
@@ -85,7 +83,7 @@ services:
       - ./backend:/app
       - file_uploads:/app/uploads
     env_file:
-      - ./backend/.env
+      - .env
     environment:
       - NUMBA_CACHE_DIR=/tmp
     depends_on:
