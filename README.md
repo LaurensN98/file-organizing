@@ -97,15 +97,29 @@ This is an active prototype. Please note the following implementation details:
    ```
 
 2. **Environment Setup:**
-   Create a `.env` file in `./backend`:
+   Copy `.env.example` to `.env` in the root directory and fill in your keys:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   The `.env` file should look like this:
 
    ```env
+   # Database Credentials
    POSTGRES_USER=neatly_admin
    POSTGRES_PASSWORD=your_secure_password
    POSTGRES_DB=db
-   OPENROUTER_API_KEY=your_key_here
+   POSTGRES_HOST=db
+   POSTGRES_PORT=5432
+
+   # API Keys
+   OPENROUTER_API_KEY=your_openrouter_key
+
+   # Services URLs
    REDIS_URL=redis://redis:6379/0
-   INFERENCE_URL=http://host.docker.internal:8081
+   INFERENCE_URL=http://inference:7997/v1
+   DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
    ```
 
 3. **Start Local Inference Server (macOS Metal Accelerated):**
