@@ -9,7 +9,7 @@ def test_read_root():
     """
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"message": "Welcome to Intelligent Document Management System"}
+    assert response.json() == {"message": "Welcome to Neatly"}
 
 def test_upload_router_exists():
     """

@@ -1,13 +1,17 @@
 import os
 import logging
 import warnings
-import asyncio
 import time
 import numpy as np
 import umap
 from sklearn.cluster import HDBSCAN
-from openai import AsyncOpenAI
-from typing import List, Dict
+from sklearn.decomposition import PCA
+import base64
+import asyncio
+from typing import List, Dict, Tuple, Any
+from app.core.config import settings
+from app.services.openai_client import client
+from app.services.embeddings import get_embeddings, generate_sparse_embeddings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -15,179 +19,199 @@ logger = logging.getLogger(__name__)
 # Suppress UMAP UserWarnings
 warnings.filterwarnings("ignore", category=UserWarning, module="umap")
 
-# Initialize client for OpenRouter
-client = AsyncOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY", "dummy-key"),
-)
-
-async def get_embeddings(texts: List[str]) -> np.ndarray:
-    """Fetch embeddings from OpenRouter using Qwen model in parallel batches."""
-    if not texts:
-        return np.array([])
-    
-    batch_size = 25 # Smaller batches for more concurrency
-    
-    async def fetch_batch(batch: List[str], batch_idx: int):
-        try:
-            response = await client.embeddings.create(
-                input=batch,
-                model="qwen/qwen3-embedding-8b",
-                extra_body={
-                    "provider": {
-                        "order": ["nebius"],
-                    }
-                }
-            )
-            return [data.embedding for data in response.data]
-        except Exception as e:
-            logger.error(f"Embedding error in batch {batch_idx}: {e}")
-            return [np.random.rand(1536).tolist() for _ in range(len(batch))]
-
-    tasks = []
-    for i in range(0, len(texts), batch_size):
-        tasks.append(fetch_batch(texts[i:i + batch_size], i // batch_size))
-    
-    results = await asyncio.gather(*tasks)
-    
-    # Flatten the results
-    all_embeddings = [emb for batch_result in results for emb in batch_result]
-    return np.array(all_embeddings)
-
-async def get_cluster_label(texts: List[str]) -> str:
-    """Generate a concise folder name using Google Gemini via OpenRouter."""
-    # Construct a prompt with the first few documents
-    prompt = "Based on the following document snippets, generate a concise (1-3 words) folder name that categorizes them. "
-    prompt += "Do not use markdown formatting, bolding (like **), or special characters. Output only the plain text name:\n\n"
-    prompt += "\n---\n".join([t[:500] for t in texts[:5]])
-    
-    try:
-        response = await client.chat.completions.create(
-            model="google/gemini-3-flash-preview", 
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=20
-        )
-        content = response.choices[0].message.content
-        if content:
-            # Clean up markdown and quotes
-            return content.strip().replace('"', '').replace('*', '').replace('_', '').replace('#', '')
-        return "Unclassified"
-    except Exception as e:
-        logger.error(f"Labeling error: {e}")
-        return "Unclassified"
-
-async def generate_dataset_summary(organized_data: List[Dict]) -> str:
-    """Generate a 1-3 sentence summary of the entire dataset."""
-    if not organized_data:
-        return "No documents processed."
-        
-    # Sample 1 document from each cluster to give the LLM good variety
-    unique_clusters = set(d["folder"] for d in organized_data)
-    sample_texts = []
-    
-    for cluster in unique_clusters:
-        # Find first doc in this cluster
-        for d in organized_data:
-            if d["folder"] == cluster and d["text"].strip():
-                sample_texts.append(f"[{cluster}]: {d['text'][:300]}")
-                break
-    
-    if not sample_texts:
-        return "A collection of documents."
-
-    prompt = "Analyze the following document snippets (categorized by cluster). "
-    prompt += "Write a brief, 1-3 sentence description of what this entire dataset represents (e.g., 'A collection of legal contracts and financial invoices regarding...'). "
-    prompt += "Do not use markdown. Keep it professional and concise:\n\n"
-    prompt += "\n".join(sample_texts[:15]) # Limit to 15 samples to fit context
-
-    try:
-        response = await client.chat.completions.create(
-            model="google/gemini-3-flash-preview",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300
-        )
-        content = response.choices[0].message.content
-        return content.strip() if content else "An organized collection of documents."
-    except Exception as e:
-        logger.error(f"Summary generation error: {e}")
-        return "An organized collection of documents."
 
 def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.ndarray, np.ndarray]:
     """
-    Synchronous worker for CPU-intensive UMAP and HDBSCAN tasks.
-    Runs in a separate thread.
+    Synchronous worker for dimensionality reduction and clustering.
     """
-    # 2. Dimensionality Reduction (UMAP)
-    # Adjust parameters for small datasets to prevent spectral initialization errors
     init_mode = "random" if n_samples < 15 else "spectral"
-    n_neighbors = min(n_samples - 1, 15)
+    n_neighbors = min(n_samples - 1, 15) 
     
-    # Reduction for Clustering (High dim)
-    n_components_cluster = min(n_samples - 2, 5) if n_samples > 10 else min(n_samples - 1, 5)
-    
-    if n_samples <= 3:
-         # Skip reduction for tiny datasets
-         embeddings_for_clustering = embeddings
-         embeddings_for_viz = embeddings[:, :2] if embeddings.shape[1] >= 2 else embeddings
+    # 1. Dimensionality Reduction for Clustering
+    if n_samples < 50:
+         # Use PCA for small datasets
+         n_components_pca = min(n_samples - 1, 10)
+         pca = PCA(n_components=n_components_pca, random_state=42)
+         embeddings_for_clustering = pca.fit_transform(embeddings)
     else:
-         # 2a. Clustering Reduction (e.g. 10D)
+         # Use UMAP for datasets >= 50
          reducer_cluster = umap.UMAP(
-            n_neighbors=n_neighbors,
-            n_components=n_components_cluster,
+            n_neighbors=15,
+            n_components=15,
             min_dist=0.0, 
             metric='cosine',
             random_state=42,
-            init=init_mode
+            init=init_mode,
+            n_jobs=1 
         )
          embeddings_for_clustering = reducer_cluster.fit_transform(embeddings)
          
-         # 2b. Visualization Reduction (2D)
+    # 2. Dimensionality Reduction for Visualization
+    if n_samples <= 3:
+         embeddings_for_viz = embeddings[:, :2] if embeddings.shape[1] >= 2 else embeddings
+    else:
          reducer_viz = umap.UMAP(
             n_neighbors=n_neighbors,
             n_components=2,
             min_dist=0.0, 
             metric='cosine',
             random_state=42,
-            init=init_mode
+            init=init_mode,
+            n_jobs=1 
         )
          embeddings_for_viz = reducer_viz.fit_transform(embeddings)
 
     # 3. Clustering (HDBSCAN)
     clusterer = HDBSCAN(
-        min_cluster_size=2,
-        cluster_selection_epsilon=0.5, 
+        min_cluster_size=2, 
+        min_samples=2,                  
+        cluster_selection_method='leaf', 
         metric='euclidean',
-        )
-    # Use the higher dimensional embeddings for better clustering
+        n_jobs=1 
+    )
+    
     cluster_labels = clusterer.fit_predict(embeddings_for_clustering)
     
+    # # 4. Post-processing: force-assign any remaining noise (-1) to the nearest cluster.
+    # unique_labels = set(cluster_labels)
+    # if -1 in unique_labels:
+    #     # We have at least one valid cluster to map noise into
+    #     valid_labels = [l for l in unique_labels if l != -1]
+        
+    #     # Calculate centroids for each valid cluster
+    #     cluster_centers = {
+    #         l: np.mean(embeddings_for_clustering[cluster_labels == l], axis=0)
+    #         for l in valid_labels
+    #     }
+        
+    #     for i, label in enumerate(cluster_labels):
+    #         if label == -1:
+    #             point = embeddings_for_clustering[i]
+    #             # Find the nearest valid cluster based on Euclidean distance
+    #             nearest_label = min(
+    #                 valid_labels, 
+    #                 key=lambda l: np.linalg.norm(point - cluster_centers[l])
+    #             )
+    #             cluster_labels[i] = nearest_label
     return cluster_labels, embeddings_for_viz
 
-async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
+async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
+    """Generate a concise folder name by analyzing filenames and content snippets."""
+    if not samples:
+        return "Miscellaneous"
+
+    prompt = (
+        "Analyze the following sample documents (formatted as 'Filename | Text Excerpt') which all belong to the same cluster. "
+        "Find the common denominator that unifies all these samples. "
+        "Provide ONLY a single, general umbrella folder name (1-3 words) that accurately captures the entire collection. "
+        "Do not return JSON. Do not return markdown. Do not explain. Return ONLY the folder title.\n\n"
+        "Examples: 'Financial Reports', 'Legal Contracts', 'Resume Applications', 'Product Manuals'.\n\n"
+        "Cluster Samples:\n"
+    )
+    
+    # Give the model a diverse look at the cluster
+    sample_blocks = []
+    for s in samples[:8]:
+        filename = s.get("filename", "Unknown")
+        excerpt = (s.get("text") or "")[:800]
+        sample_blocks.append(f"{filename} | {excerpt}")
+
+    prompt += "\n---\n".join(sample_blocks)
+    
+    try:
+        logger.info(f"Generating label for cluster with {len(samples)} documents...")
+        response = await client.chat.completions.create(
+            model="xiaomi/mimo-v2-flash", 
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=20,
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        if content:
+            logger.info(f"Raw Label result: {content[:100]}...")
+
+            # Clean up markdown, quotes, and common JSON artifacts
+            clean_content = content.strip().replace('"', '').replace("'", "").replace('{', '').replace('}', '').replace('*', '').replace('_', '').replace('#', '')
+            if ":" in clean_content and len(clean_content.split(":")) > 1:
+                # Handle cases like "Folder: Name"
+                clean_content = clean_content.split(":")[-1].strip()
+                
+            return clean_content
+        return "Miscellaneous"
+    except Exception as e:
+        logger.error(f"Labeling error: {e}")
+        return "Miscellaneous"
+
+async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
+    """Generate a 1-3 sentence summary of the entire dataset based on cluster samples."""
+    if not cluster_data:
+        return "A collection of documents."
+        
+    sample_texts = []
+    for item in cluster_data[:15]: # Up to 15 different clusters/docs
+        sample_texts.append(f"[Group: {item['category']}]: {item['text'][:300]}...")
+
+    prompt = (
+        "Analyze these document snippets, which have been grouped into logical categories. "
+        "Provide a single, professional 1-3 sentence summary of what this entire collection represents. "
+        "Refer to the themes found in the groups. Do not use markdown.\n\n"
+        "Document Groups:\n" + "\n".join(sample_texts)
+    )
+
+    try:
+        logger.info("Generating dataset summary...")
+        response = await client.chat.completions.create(
+            model="xiaomi/mimo-v2-flash",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=250
+        )
+        content = response.choices[0].message.content
+        if content:
+            return content.strip()
+        return "An organized collection of documents."
+    except Exception as e:
+        logger.error(f"Summary generation error: {e}")
+        return "An organized collection of documents."
+
+async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
     """
     Core ML Pipeline:
-    1. Embed text (Qwen/OpenRouter)
-    2. Reduce dimensions (UMAP)
-    3. Cluster (HDBSCAN)
-    4. Label clusters (Gemini/OpenRouter)
+    Returns (organized_data, dataset_summary)
     """
     if not processed_data:
-        return []
+        return [], "No data."
 
-    texts = [d["text"] for d in processed_data if d["text"].strip()]
+    # Combine filename and text for maximum signal in both clustering and search
+    texts = [f"Filename: {d['filename']} | {d.get('text') or ''}".strip() for d in processed_data]
     n_samples = len(texts)
+    logger.info(f"Number of samples for ML processing: {n_samples}")
 
-    if n_samples < 2:
-        for d in processed_data:
-            d["folder"] = "Misc"
-        return processed_data
+
+
 
     # 1. Embeddings (I/O Bound - Async)
     t0 = time.time()
     embeddings = await get_embeddings(texts)
     logger.info(f"Embeddings generated in {time.time() - t0:.2f}s")
+
+    # Generate sparse embeddings in batches to avoid timeouts on CPU
+    logger.info(f"Generating sparse embeddings for {n_samples} documents...")
+    all_sparse_embeddings = await generate_sparse_embeddings(texts, batch_size=32)
+    logger.info(f"Sparse embeddings successfully generated.")
+
+    # For tiny datasets, return immediately to avoid HDBSCAN/UMAP errors
+    if n_samples < 2:
+        logger.info("Tiny dataset detected, skipping complex clustering.")
+        for i, d in enumerate(processed_data):
+            d["folder"] = "Unsorted"
+            d["x"], d["y"] = 0.0, 0.0
+            # Safety check: if embeddings is a numpy array, it has .tolist()
+            d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
+            d["sparse_embedding"] = all_sparse_embeddings[i] if i < len(all_sparse_embeddings) else {}
+        return processed_data, "An organized collection of documents."
+
     
     # 2 & 3. Reduction & Clustering (CPU Bound - Offload to Thread)
     t1 = time.time()
@@ -198,32 +222,67 @@ async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
 
     logger.info(f"UMAP & HDBSCAN took {time.time() - t1:.2f}s")
     
-    # 4. Labeling Clusters (Parallelized)
+    # 4. Labeling & Summary (Concurrent "Mega-Burst")
     t3 = time.time()
     unique_clusters = set(cluster_labels)
     cluster_names = {}
     
     label_tasks = []
     cluster_ids_for_tasks = []
+    summary_sampling_data = []
 
     for cluster_id in unique_clusters:
+        indices = [i for i, l in enumerate(cluster_labels) if l == cluster_id]
+        
+        # Build structured samples for labeling
+        cluster_samples = []
+        for idx in indices[:8]:
+            doc = processed_data[idx]
+            cluster_samples.append({
+                "filename": doc["filename"],
+                "text": (doc.get("text") or "")
+            })
+
+        # Data for summary task (take up to 2 snippets of this cluster for more variety)
+        category_name = cluster_id if cluster_id != -1 else "Unsorted"
+        for s in cluster_samples[:2]:
+            summary_sampling_data.append({
+                "category": category_name,
+                "text": f"{s['filename']} | {s['text'][:300]}..."
+            })
+
         if cluster_id == -1:
             cluster_names[cluster_id] = "Unsorted"
         else:
-            # Get samples for this cluster to generate a label
-            indices = [i for i, l in enumerate(cluster_labels) if l == cluster_id]
-            sample_texts = [texts[i] for i in indices]
-            
-            # Create a task for labeling
-            label_tasks.append(get_cluster_label(sample_texts))
+            label_tasks.append(get_cluster_label(cluster_samples))
             cluster_ids_for_tasks.append(cluster_id)
     
-    # Run labeling tasks concurrently
-    if label_tasks:
-        labels = await asyncio.gather(*label_tasks)
-        for cid, label in zip(cluster_ids_for_tasks, labels):
-            cluster_names[cid] = label
-    logger.info(f"Cluster labeling took {time.time() - t3:.2f}s")
+    # Fire Labeling AND Summary together
+    all_ai_tasks = label_tasks + [generate_dataset_summary(summary_sampling_data)]
+    raw_results = await asyncio.gather(*all_ai_tasks, return_exceptions=True)
+    
+    # Check for exceptions in gather
+    cleaned_results: List[Any] = []
+    # Use a copy to avoid slicing issues if needed, or just index safely
+    for r in list(raw_results):
+        if isinstance(r, Exception):
+            logger.error(f"AI Task failed: {r}")
+            cleaned_results.append("Miscellaneous Error")
+        else:
+            cleaned_results.append(r)
+    
+    # Ensure dataset_summary is a string for logging
+    final_summary = str(cleaned_results[-1]) if len(cleaned_results) > 0 else "No summary."
+    dataset_summary: str = final_summary
+    # Labels represent all results except the last one (summary)
+    labels: List[str] = [str(r) for idx, r in enumerate(cleaned_results) if idx < len(cleaned_results) - 1]
+    
+    logger.info(f"Summary result: {final_summary[:100]}...")
+    
+    for cid, label in zip(cluster_ids_for_tasks, labels):
+        cluster_names[cid] = label
+        
+    logger.info(f"AI Concurrent Burst took {time.time() - t3:.2f}s")
 
     # Map texts back to folder names and coords
     text_to_folder = {}
@@ -242,10 +301,21 @@ async def clustering_pipeline(processed_data: List[Dict]) -> List[Dict]:
             # Dummy coords for tiny datasets to prevent UI crash
             text_to_coords[text] = {"x": float(i), "y": float(i)}
 
-    for d in processed_data:
-        d["folder"] = text_to_folder.get(d["text"], "Misc")
-        coords = text_to_coords.get(d["text"], {"x": 0.0, "y": 0.0})
+    # Generate sparse embeddings in batches to avoid timeouts on CPU
+    logger.info(f"Generating sparse embeddings for {n_samples} documents...")
+    all_sparse_embeddings = await generate_sparse_embeddings(texts, batch_size=32)
+    logger.info(f"Sparse embeddings successfully generated.")
+
+    # Final mapping of results (folders, coords, embeddings) to processed_data
+    for i, d in enumerate(processed_data):
+        combined_text = texts[i]
+        d["folder"] = text_to_folder.get(combined_text, "Misc")
+        coords = text_to_coords.get(combined_text, {"x": 0.0, "y": 0.0})
         d["x"] = coords["x"]
         d["y"] = coords["y"]
         
-    return processed_data
+        # Store both dense and sparse embeddings for persistence 
+        d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
+        d["sparse_embedding"] = all_sparse_embeddings[i]
+        
+    return processed_data, dataset_summary
