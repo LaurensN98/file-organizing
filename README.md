@@ -7,8 +7,8 @@
 ## Key Features
 
 - **AI-Powered Labeling:** Automatically generates semantic folder names and dataset summaries using LLMs (MiMo v2 Flash).
-- **Unsupervised Clustering:** Uses **UMAP** for dimensionality reduction and **HDBSCAN** for high-accuracy density-based document grouping.
-- **Hybrid Search:** Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Relative Score Fusion (RSF) with alpha-weighting to heavily prioritize exact keyword matching.
+- **Unsupervised Clustering:** Uses **UMAP** and **PCA** for dimensionality reduction and **HDBSCAN** for density-based document grouping.
+- **Hybrid Search:** Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Relative Score Fusion (RSF) with alpha-weighting to prioritize exact keyword matching.
 - **Interactive visualization:** Explore your document landscape through a dynamic 2D scatter plot with zooming and metadata inspection.
 - **Asynchronous pipeline:** Scalable background processing using **Celery** and **Redis** for efficient large-scale file ingestion.
 - **Automated Organization:** Delivers organized file structures back to the user as a streamed ZIP file.
@@ -26,8 +26,8 @@ The processing engine currently supports the following document and image format
 This is an active prototype. Please note the following implementation details:
 
 - **Frontend Navigation:** The sidebar navigation links and footer options are currently placeholders and not fully functional.
-- **Search:** The Hybrid Search is fully functional and optimized for the current schema.
-- **PII Redaction:** The production-grade PII scrubbing hook is currently a placeholder (scrubs basic patterns) and should be replaced with a service like Microsoft Presidio for enterprise use.
+- **Search:** The Hybrid Search is fully functional yet improvements need to be made for better file indexing.
+- **PII Redaction:** The PII scrubbing hook is currently a placeholder and should be replaced with a service like Microsoft Presidio for enterprise use.
 
 ## System Architecture
 
@@ -39,7 +39,7 @@ This is an active prototype. Please note the following implementation details:
    - **Multi-Vector Embedding:**
      - **Dense:** Generates semantic embeddings via OpenRouter (Qwen).
      - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
-   - **Clustering:** Reduces dimensions with UMAP and groups documents with HDBSCAN.
+   - **Clustering:** Reduces dimensions with UMAP & PCA and groups documents with HDBSCAN.
    - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
 3. **Storage:** Metadata and vectors are stored in **TimescaleDB (PostgreSQL)** using `pgvector` and `pgvectorscale`.
 4. **Discovery:** Users can perform **Hybrid Search** across the processed dataset or explore the interactive 2D map.
@@ -49,7 +49,7 @@ This is an active prototype. Please note the following implementation details:
 - **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS, Framer Motion, Recharts.
 - **Backend:** FastAPI (Python 3.11), Celery, SQLAlchemy.
 - **Inference Service:** HuggingFace Text Embeddings Inference (TEI) running SPLADE (naver/splade-cocondenser-ensembledistil).
-- **Machine Learning:** UMAP-learn, HDBSCAN, Scikit-learn, LangDetect.
+- **Machine Learning:** UMAP-learn, PCA, HDBSCAN, Scikit-learn, LangDetect.
 - **Database:** TimescaleDB (PostgreSQL 16) with `pgvector` and `pgvectorscale` for vector similarity search.
 - **Infrastructure:** Docker & Docker Compose, Redis (Task Queue), GitHub Actions (CI/CD).
 
