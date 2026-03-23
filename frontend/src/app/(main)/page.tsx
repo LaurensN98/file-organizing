@@ -14,23 +14,23 @@ export default function Home() {
               Neatly Organized.
             </span>
           </h1>
-          <p className="text-[1.35rem] text-gray-500 max-w-[50rem] mb-10 leading-relaxed font-medium">
+          <p className="text-[1.15rem] text-gray-500 max-w-[50rem] mb-10 leading-relaxed font-normal">
             Stop hunting for documents. Our intelligent curator automatically
             clusters your files by context, providing editorial precision to
             your digital chaos.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-6">
-            <button className="bg-gradient-primary hover:bg-[#1E1753] text-white px-8 py-4 rounded-2xl font-medium text-[1.1rem] transition-all] hover:shadow-[0_8px_30px_rgb(45,36,119,0.4)]">
+            <button className="bg-gradient-primary hover:brightness-150 transition-all duration-100 text-white px-8 py-4 rounded-2xl font-normal text-[1rem]">
               Start Your Free Trial
             </button>
-            <button className="bg-white border border-gray-100 hover:border-gray-200 text-gray-900 px-8 py-4 rounded-2xl font-medium text-[1.1rem] transition-colors">
+            <button className="bg-white border border-gray-100 hover:border-gray-200 hover:shadow-md duration-200 text-gray-900 px-8 py-4 rounded-2xl font-normal text-[1rem]">
               Watch Product Tour
             </button>
           </div>
 
           {/* Upload Component */}
-          <div className="max-w-4xl mx-auto px-6 mt-10 mb-20 relative z-10 w-full">
+          <div className="max-w-4xl mx-auto px-6 mt-10 mb-10 relative z-10 w-full">
             <FileUpload />
           </div>
         </div>
@@ -306,59 +306,72 @@ export default function Home() {
       </div>
 
       {/* Advanced Intelligence Section */}
-      <div className="py-24 bg-[#FDFDFE] relative border-t border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 items-center">
-          {/* Left Side (Visual Dashboard) */}
-          <div className="relative w-full aspect-[4/3] max-w-2xl mx-auto lg:mx-0">
-            <div className="absolute inset-0 bg-white rounded-[2rem] border border-gray-100 overflow-hidden flex flex-col">
-              <div className="relative w-full h-full rounded-[1.25rem] overflow-hidden bg-gray-50">
-                <Image
-                  src="/images/scatter-visual.png"
-                  alt="Semantic Document Landscape"
-                  fill
-                  className="object-cover object-left-top"
-                />
-              </div>
-            </div>
+      <div className="py-24 bg-[#FDFDFE] relative border-t border-b border-gray-100 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col items-center">
+          <div className="text-center mb-20 max-w-4xl">
+            <h2 className="text-[3rem] md:text-[4.5rem] font-bold text-[#0B1021] leading-[1.05] tracking-tight mb-8">
+              The Geometry of <br /> Your Knowledge
+            </h2>
+            <p className="text-xl text-gray-500 max-w-2xl mx-auto font-medium">
+              A spatial dimension for your documents. We map the unseen
+              connections across your digital workspace.
+            </p>
           </div>
 
-          {/* Right Side */}
-          <div className="flex flex-col">
-            <div className="mb-2">
-              <h2 className="text-[2.5rem] md:text-[3.5rem] font-bold text-[#0B1021] leading-[1.1] tracking-tight">
-                The Geometry of <br /> Your Knowledge
-              </h2>
+          {/* Visual Dashboard */}
+          <div className="flex justify-center w-full gap-6">
+            <div className="relative w-3/4 rounded-3xl shadow-sm overflow-hidden border border-gray-100">
+              <Image
+                src="/images/scatter-visual.png"
+                alt="Semantic Document Landscape"
+                width={2000}
+                height={2000}
+                className="w-full border-none"
+              />
             </div>
 
-            <div className="mt-8 flex flex-col gap-6">
+            {/* Features Grid */}
+            <div className="flex flex-col gap-8 w-96">
               {/* Feature 1 */}
-              <div className="flex gap-4">
-                <div className="flex-shrink-0 w-12 h-8 flex items-center justify-center text-[#203047] bg-white">
-                  <Map size={22} className="text-[#0B1021]" />
+              <div className="flex gap-6">
+                <div className="flex justify-center">
+                  <Image
+                    src="/images/map.png"
+                    alt="Map Icon"
+                    width={18}
+                    height={18}
+                    className="w-24 translate-y-1.5"
+                  />
                 </div>
                 <div>
-                  <h4 className="text-xl font-bold text-[#0B1021] mb-1">
+                  <h4 className="text-xl font-bold text-[#0B1021] mb-2">
                     Semantic Document Landscape
                   </h4>
-                  <p className="text-gray-500 leading-relaxed">
+                  <p className="text-gray-500 leading-relaxed text-md">
                     Neatly maps your entire digital footprint into a visual 2D
-                    landscape. Using neural embeddings, we cluster documents
-                    based on their underlying meaning and conceptual
-                    relationships, letting you navigate your files spatially.
+                    landscape. Using neural embeddings, we cluster documents based
+                    on their underlying meaning and conceptual relationships,
+                    letting you navigate your files spatially.
                   </p>
                 </div>
               </div>
 
               {/* Feature 2 */}
-              <div className="flex gap-4">
-                <div className="flex-shrink-0 w-12 h-8 flex items-center justify-center text-[#203047] bg-white">
-                  <Search size={22} className="text-[#0B1021]" />
+              <div className="flex gap-6">
+                <div className="flex justify-center">
+                  <Image
+                    src="/images/search.png"
+                    alt="Search Icon"
+                    width={18}
+                    height={18}
+                    className="w-24 translate-y-1.5"
+                  />
                 </div>
                 <div>
-                  <h4 className="text-xl font-bold text-[#0B1021] mb-1">
+                  <h4 className="text-xl font-bold text-[#0B1021] mb-2">
                     Vector-Powered Search
                   </h4>
-                  <p className="text-gray-500 leading-relaxed">
+                  <p className="text-gray-500 leading-relaxed text-md">
                     Stop trying to remember filenames. Our vector-based search
                     engine understands the intent behind your query. Search for
                     concepts or ideas, and find the exact paragraph or image you
@@ -368,6 +381,7 @@ export default function Home() {
               </div>
             </div>
           </div>
+
         </div>
       </div>
 
@@ -381,20 +395,20 @@ export default function Home() {
             Ready to reclaim your <br className="hidden md:block" /> digital
             headspace?
           </h2>
-          <p className="text-indigo-100/90 text-[1.15rem] max-w-2xl mb-12 relative z-10 font-medium leading-relaxed">
+          <p className="text-indigo-100/90 text-[1.15rem] max-w-2xl mb-12 relative z-10 font-normal leading-relaxed">
             Join 10,000+ creators and professional teams who organized their
             life with Neatly.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center gap-6 relative z-10">
-            <button className="bg-white hover:bg-gray-50 text-[#3A32A8] px-10 py-4 rounded-2xl font-bold text-[1.05rem] transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 whitespace-nowrap">
+            <button className="bg-white hover:bg-gray-50 text-[#3A32A8] px-10 py-4 rounded-2xl font-semibold text-[1.05rem] transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 whitespace-nowrap">
               Start Free Now
             </button>
             <div className="text-center sm:text-left flex flex-col justify-center">
               <span className="text-white font-bold text-[0.95rem]">
                 No credit card required.
               </span>
-              <span className="text-indigo-200/80 text-[0.9rem] mt-0.5">
+              <span className="text-indigo-200/80 text-[0.9rem]">
                 Free 14-day trial on all plans.
               </span>
             </div>
