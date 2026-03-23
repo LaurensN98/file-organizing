@@ -13,4 +13,14 @@
   body {
     @apply bg-slate-50 text-slate-900 antialiased;
   }
+
+  h1, h2 {
+    font-family: var(--font-manrope);
+  }
+}
+
+@layer utilities {
+  .bg-gradient-primary {
+    @apply bg-gradient-to-br from-[#473BE8] to-[#14046C];
+  }
 }
