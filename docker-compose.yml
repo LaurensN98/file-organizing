@@ -26,7 +26,6 @@ services:
     env_file:
       - .env
     environment:
-      - INFERENCE_URL=http://host.docker.internal:8081
       - NUMBA_CACHE_DIR=/tmp
     depends_on:
       db:
