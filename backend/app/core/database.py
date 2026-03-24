@@ -49,3 +49,10 @@ def init_db():
         except Exception as e:
             logger.error(f"Vector indexing failed: {e}")
             conn.rollback()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
