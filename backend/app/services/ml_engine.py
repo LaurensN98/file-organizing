@@ -70,7 +70,7 @@ def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.n
         min_cluster_size=2, 
         min_samples=1,                  
         cluster_selection_method='leaf', 
-        cluster_selection_epsilon=0.4,
+        cluster_selection_epsilon=0.5,
         metric='euclidean', 
         allow_single_cluster=True, 
         n_jobs=1 
@@ -107,6 +107,14 @@ async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
         logger.info(f"Generating label for cluster with {len(samples)} documents...")
         response = await client.chat.completions.create(
             model="xiaomi/mimo-v2-flash", 
+            extra_body={
+                "provider": {
+                    "sort": "throughput", 
+                    "preferred_min_throughput": {
+                        'p90': 25, 
+                    }
+                }
+            },
             messages=[
                 {"role": "user", "content": prompt}
             ],
@@ -150,6 +158,14 @@ async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
         response = await client.chat.completions.create(
             model="xiaomi/mimo-v2-flash",
             messages=[{"role": "user", "content": prompt}],
+            extra_body={
+                "provider": {
+                    "sort": "throughput", 
+                    "preferred_min_throughput": {
+                        'p90': 25, 
+                    }
+                }
+            },
             max_tokens=250
         )
         content = response.choices[0].message.content
@@ -291,7 +307,7 @@ async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], s
     for cid, label in zip(cluster_ids_for_tasks, labels):
         cluster_names[cid] = label
         
-    logger.info(f"AI Concurrent Burst took {time.time() - t3:.2f}s")
+    logger.info(f"Labeling & Summary took {time.time() - t3:.2f}s")
 
     # Map texts back to folder names and coords
     text_to_folder = {}

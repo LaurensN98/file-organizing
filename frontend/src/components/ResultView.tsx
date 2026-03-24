@@ -121,7 +121,7 @@ export default function ResultView({
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const response = await axios.post(`${apiUrl}/api/vector-search`, null, {
-        params: { query: searchQuery, limit: 25 },
+        params: { query: searchQuery, limit: 25, batch_id: batchId },
       });
       // The endpoint returns a list of {id, filename, folder, score}
       const scoreMap: Record<string, number> = {};
