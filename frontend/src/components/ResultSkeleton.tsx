@@ -59,7 +59,7 @@ export function FoldersSkeleton() {
 export default function ResultSkeleton() {
   return (
     <div className="min-h-screen bg-gray-50 py-12">
-      <div className="max-w-7xl mx-auto px-12">
+      <div className="max-w-7xl mx-auto px-6">
         {/* Header Skeleton */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12 animate-pulse">
           <div>
