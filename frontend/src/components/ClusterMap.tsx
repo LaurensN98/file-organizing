@@ -95,16 +95,18 @@ export default function ClusterMap({
       clusterPoints[p.folder].push(p);
     });
 
-    return Object.entries(clusterPoints).map(([folder, pts]) => {
-      const avgX = pts.reduce((sum, p) => sum + p.vx, 0) / pts.length;
-      const avgY = pts.reduce((sum, p) => sum + p.vy, 0) / pts.length;
-      return {
-        folder,
-        x: avgX,
-        y: avgY,
-        color: pts[0].color,
-      };
-    });
+    return Object.entries(clusterPoints)
+      .filter(([folder]) => folder !== "Miscellaneous" && folder !== "Misc")
+      .map(([folder, pts]) => {
+        const avgX = pts.reduce((sum, p) => sum + p.vx, 0) / pts.length;
+        const avgY = pts.reduce((sum, p) => sum + p.vy, 0) / pts.length;
+        return {
+          folder,
+          x: avgX,
+          y: avgY,
+          color: pts[0].color,
+        };
+      });
   }, [points]);
 
   const highlightedPoint = useMemo(
