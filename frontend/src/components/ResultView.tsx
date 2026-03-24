@@ -28,6 +28,11 @@ export interface AnalysisItem {
     file_type: string;
     page_count?: number;
     language?: string;
+    // New LLM Fields
+    summary?: string;
+    suggested_filename?: string;
+    document_type?: string;
+    tags?: string[];
   };
 }
 
@@ -227,7 +232,7 @@ export default function ResultView({
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
-      <div className="max-w-7xl mx-auto px-12">
+      <div className="max-w-7xl mx-auto px-6">
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
           <div>
@@ -256,7 +261,7 @@ export default function ResultView({
 
           <button
             onClick={handleDownload}
-            className="flex items-center gap-3 bg-[#4A80A6] text-sm text-white px-4 py-2.5 rounded-2xl font-semibold hover:bg-[#3A7096] transition-all  active:scale-95 whitespace-nowrap"
+            className="flex items-center gap-3 bg-gradient-primary text-sm text-white px-4 py-2.5 rounded-2xl font-semibold hover:bg-[#3A7096] transition-all  active:scale-95 whitespace-nowrap"
           >
             <Download size={16} />
             Download ZIP
@@ -431,32 +436,96 @@ export default function ResultView({
                 </span>
               </div>
               {filteredAnalysis.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100 group transition-all hover:border-blue-200 hover:shadow-sm"
-                  onMouseEnter={() => setHoveredFileId(doc.id)}
-                  onMouseLeave={() => setHoveredFileId(null)}
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <Image
-                      src="/images/document.png"
-                      alt="Process Time"
-                      width={18}
-                      height={18}
-                      className="w-6"
-                    />
-                    <span className="text-sm text-gray-700 truncate font-medium">
-                      {doc.filename}
-                    </span>
+                <div key={doc.id} className="relative group/file">
+                  <div
+                    className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100 group transition-all hover:border-blue-200 hover:shadow-sm cursor-help"
+                    onMouseEnter={() => setHoveredFileId(doc.id)}
+                    onMouseLeave={() => setHoveredFileId(null)}
+                  >
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <Image
+                        src="/images/document.png"
+                        alt="Doc"
+                        width={18}
+                        height={18}
+                        className="w-6"
+                      />
+                      <span className="text-sm text-gray-700 truncate font-medium">
+                        {doc.filename}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 ml-4">
+                      <span className="text-[10px] uppercase bg-gray-100 px-2 py-0.5 rounded-full font-bold text-gray-500">
+                        {doc.metadata.file_type}
+                      </span>
+                      <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">
+                        {doc.metadata.file_size_kb} KB
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0 ml-4">
-                    <span className="text-[10px] uppercase bg-gray-100 px-2 py-0.5 rounded-full font-bold text-gray-500">
-                      {doc.metadata.file_type}
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">
-                      {doc.metadata.file_size_kb} KB
-                    </span>
-                  </div>
+
+                  {/* Tooltip Overlay */}
+                  <AnimatePresence>
+                    {hoveredFileId === doc.id && doc.metadata.summary && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                        className="absolute z-[100] bottom-full left-0 mb-3 w-[340px] bg-white text-[#203047] p-5 rounded-[24px] shadow-2xl border border-gray-100 pointer-events-none origin-bottom-left"
+                      >
+                        <div className="flex items-center gap-2 mb-4">
+                          <div className="w-2 h-2 rounded-full bg-[#4A80A6]" />
+                          <span className="text-[10px] uppercase tracking-widest font-black text-[#4A80A6]/60">
+                            AI Metadata Insight
+                          </span>
+                        </div>
+
+                        {doc.metadata.suggested_filename && (
+                          <div className="mb-4">
+                            <span className="text-[11px] text-gray-400 block mb-1">
+                              Proposed Filename
+                            </span>
+                            <span className="text-xs font-bold text-[#4A80A6] break-all leading-tight">
+                              {doc.metadata.suggested_filename}
+                            </span>
+                          </div>
+                        )}
+
+                        {doc.metadata.document_type && (
+                          <div className="mb-4">
+                            <span className="text-[11px] text-gray-400 block mb-1">
+                              Classification
+                            </span>
+                            <span className="text-xs font-bold bg-gray-50 text-gray-600 px-2 py-1 rounded-lg border border-gray-100">
+                              {doc.metadata.document_type}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="mb-4">
+                          <span className="text-[11px] text-gray-400 block mb-1.5">
+                            AI Summary
+                          </span>
+                          <p className="text-xs leading-relaxed text-gray-600 font-medium italic">
+                            &ldquo;{doc.metadata.summary}&rdquo;
+                          </p>
+                        </div>
+
+                        {doc.metadata.tags && doc.metadata.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-50">
+                            {doc.metadata.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="text-[9px] font-bold text-[#4A80A6]/70 bg-[#4A80A6]/5 px-2 py-0.5 rounded-md"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               ))}
             </div>
@@ -466,7 +535,10 @@ export default function ResultView({
               {Object.entries(groupedFiles).map(([folder, folderFiles]) => (
                 <div
                   key={folder}
-                  className="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                  className={clsx(
+                    "bg-white rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow relative",
+                    hoveredFileId ? "!overflow-visible" : "overflow-hidden",
+                  )}
                 >
                   <button
                     onClick={() =>
@@ -475,7 +547,7 @@ export default function ResultView({
                         [folder]: !p[folder],
                       }))
                     }
-                    className="w-full flex items-center justify-between px-6 py-6 hover:bg-gray-50 transition-colors"
+                    className="w-full flex items-center justify-between px-6 py-6 hover:bg-gray-50 transition-colors rounded-t-3xl"
                   >
                     <div className="flex items-center gap-4 text-left">
                       <div className="w-10 h-10 flex items-center justify-center shrink-0">
@@ -511,38 +583,119 @@ export default function ResultView({
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.3 }}
-                        className="px-6 pb-6 pt-2 space-y-2 bg-gray-50/30 border-t border-gray-50"
+                        transition={{
+                          height: { duration: 0.4, ease: [0.4, 0, 0.2, 1] },
+                          opacity: { duration: 0.25, delay: 0.05 },
+                        }}
+                        className={clsx(
+                          hoveredFileId
+                            ? "overflow-visible"
+                            : "overflow-hidden",
+                        )}
                       >
-                        {folderFiles.map((file, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100 group transition-all hover:border-blue-200 hover:shadow-sm"
-                            onMouseEnter={() => setHoveredFileId(file.id)}
-                            onMouseLeave={() => setHoveredFileId(null)}
-                          >
-                            <div className="flex items-center gap-3 overflow-hidden">
-                              <Image
-                                src="/images/document.png"
-                                alt="Process Time"
-                                width={18}
-                                height={18}
-                                className="w-6"
-                              />
-                              <span className="text-sm text-gray-700 truncate font-medium">
-                                {file.filename}
-                              </span>
+                        <div className="px-6 pb-8 pt-4 space-y-3 bg-gray-50/40 border-t border-gray-100/50">
+                          {folderFiles.map((file, idx) => (
+                            <div key={idx} className="relative group/file">
+                              <div
+                                className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-gray-100 group transition-all hover:border-[#4A80A6]/30 hover:shadow-md hover:shadow-blue-500/5"
+                                onMouseEnter={() => setHoveredFileId(file.id)}
+                                onMouseLeave={() => setHoveredFileId(null)}
+                              >
+                                <div className="flex items-center gap-4 overflow-hidden">
+                                  <div className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors">
+                                    <Image
+                                      src="/images/document.png"
+                                      alt="Doc"
+                                      width={18}
+                                      height={18}
+                                      className="w-6 h-6 opacity-80"
+                                    />
+                                  </div>
+                                  <span className="text-sm text-[#203047]/90 truncate font-semibold">
+                                    {file.filename}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0 ml-4">
+                                  <span className="text-[10px] uppercase bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md font-black tracking-tight border border-gray-200/50">
+                                    {file.metadata.file_type}
+                                  </span>
+                                  <span className="text-[10px] text-gray-400 font-bold whitespace-nowrap">
+                                    {file.metadata.file_size_kb} KB
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Tooltip Overlay */}
+                              <AnimatePresence>
+                                {hoveredFileId === file.id &&
+                                  file.metadata.summary && (
+                                    <motion.div
+                                      initial={{
+                                        opacity: 0,
+                                        scale: 0.95,
+                                        y: 10,
+                                      }}
+                                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                                      exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                                      className="absolute z-[100] bottom-full left-0 mb-3 w-[340px] bg-white text-[#203047] p-5 rounded-[24px] shadow-2xl border border-gray-100 pointer-events-none origin-bottom-left"
+                                    >
+                                      <div className="flex items-center gap-2 mb-4">
+                                        <div className="w-2 h-2 rounded-full bg-[#4A80A6]" />
+                                        <span className="text-[10px] uppercase tracking-widest font-black text-[#4A80A6]/60">
+                                          AI Metadata Insight
+                                        </span>
+                                      </div>
+
+                                      {file.metadata.suggested_filename && (
+                                        <div className="mb-4">
+                                          <span className="text-[11px] text-gray-400 block mb-1">
+                                            Proposed Filename
+                                          </span>
+                                          <span className="text-sm font-bold text-[#4A80A6] break-all leading-tight">
+                                            {file.metadata.suggested_filename}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      {file.metadata.document_type && (
+                                        <div className="mb-4">
+                                          <span className="text-[11px] text-gray-400 block mb-1">
+                                            Classification
+                                          </span>
+                                          <span className="text-xs font-bold bg-gray-50 text-gray-600 px-2 py-1 rounded-lg border border-gray-100">
+                                            {file.metadata.document_type}
+                                          </span>
+                                        </div>
+                                      )}
+
+                                      <div className="mb-4">
+                                        <span className="text-[11px] text-gray-400 block mb-1.5">
+                                          AI Summary
+                                        </span>
+                                        <p className="text-xs leading-relaxed text-gray-600 font-medium italic">
+                                          &ldquo;{file.metadata.summary}&rdquo;
+                                        </p>
+                                      </div>
+
+                                      {file.metadata.tags &&
+                                        file.metadata.tags.length > 0 && (
+                                          <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-50">
+                                            {file.metadata.tags.map((tag) => (
+                                              <span
+                                                key={tag}
+                                                className="text-[9px] font-bold text-[#4A80A6]/70 bg-[#4A80A6]/5 px-2 py-0.5 rounded-md"
+                                              >
+                                                #{tag}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                    </motion.div>
+                                  )}
+                              </AnimatePresence>
                             </div>
-                            <div className="flex items-center gap-3 shrink-0 ml-4">
-                              <span className="text-[10px] uppercase bg-gray-100 px-2 py-0.5 rounded-full font-bold text-gray-500">
-                                {file.metadata.file_type}
-                              </span>
-                              <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">
-                                {file.metadata.file_size_kb} KB
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
