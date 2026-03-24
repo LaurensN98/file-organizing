@@ -1,61 +1,169 @@
-import io
 import os
-import base64
-import asyncio
 import logging
+import asyncio
+import json
 import time
-from typing import List, Dict, Tuple, Optional
-from fastapi import UploadFile
-import PyPDF2
+import base64
+import httpx
+import fitz # PyMuPDF
+import pymupdf4llm
 from docx import Document
+from typing import List, Dict, Tuple, Optional, Any
 from app.services.privacy import scrub_pii
-from langdetect import detect, LangDetectException
 from app.services.openai_client import client
+from app.core.config import settings
 
+# Configure logging
 logger = logging.getLogger(__name__)
 
-# Suppress PyPDF2 warnings
-logging.getLogger("PyPDF2").setLevel(logging.ERROR)
+# Suppress fitz warnings
+logging.getLogger("fitz").setLevel(logging.ERROR)
 
+# Extensions that PyMuPDF handles natively as documents
+PYMUPDF_DOC_EXTENSIONS = {".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg"}
 
-def extract_text_from_pdf_sync(content: bytes) -> Tuple[str, int]:
-    """Strictly synchronous CPU work for PDF extraction."""
-    pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
-    text = ""
-    total_pages = len(pdf_reader.pages)
-    num_pages = min(total_pages, 3)
-    for i in range(num_pages):
-        text += pdf_reader.pages[i].extract_text() or ""
-        
-    return text, total_pages
+# Extensions that should be opened as text by PyMuPDF
+PYMUPDF_TXT_EXTENSIONS = {
+    ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".xml", ".html", ".css", 
+    ".sql", ".md", ".sh", ".bash", ".yml", ".yaml", ".ini", ".conf", ".c", ".cpp", 
+    ".h", ".cs", ".java", ".go", ".rs", ".rb", ".php"
+}
 
-def extract_text_from_docx_sync(content: bytes) -> Tuple[str, Optional[int]]:
-    """Strictly synchronous CPU work for DOCX extraction."""
-    doc = Document(io.BytesIO(content))
-    text = ""
-    paragraphs = doc.paragraphs[:50] 
-    for para in paragraphs:
-        text += para.text + "\n"
-    
+def extract_text_with_pymupdf_sync(content: bytes, extension: str, is_text_file: bool = False) -> Tuple[str, int, Optional[bytes]]:
+    """Generic PyMuPDF extractor for PDFs, eBooks, SVGs, and Text files."""
     try:
-        pages = doc.part.package.app_properties.pages
-    except:
-        pages = None
+        # For text files, we specify the filetype="txt"
+        filetype = "txt" if is_text_file else extension.strip(".")
         
-    return text, pages
+        doc = fitz.open(stream=content, filetype=filetype)
+        page_count = len(doc)
+        
+        # Use pymupdf4llm for markdown extraction if it's a standard document
+        # For text files or simple SVGs, standard extraction might be cleaner
+        if not is_text_file and extension.lower() in {".pdf", ".epub", ".mobi"}:
+            md_text = pymupdf4llm.to_markdown(doc)
+        else:
+            # Join text from all pages
+            text_parts = []
+            for page in doc:
+                text_parts.append(page.get_text())
+            md_text = "\n".join(text_parts)
+        
+        # SVG Special Handling: If it's an SVG and we have no text, 
+        # or it's a very small amount of text, rasterize it.
+        rasterized_image = None
+        if extension.lower() == ".svg" and (not md_text or len(md_text.strip()) < 50):
+            try:
+                page = doc[0]
+                pix = page.get_pixmap(dpi=300)
+                rasterized_image = pix.tobytes("png")
+                logger.info("SVG rasterized as no significant text was found.")
+            except Exception as e:
+                logger.error(f"SVG rasterization failed: {e}")
+                
+        doc.close()
+        return md_text, page_count, rasterized_image
+        
+    except Exception as e:
+        logger.error(f"PyMuPDF ({extension}) extraction failed: {e}")
+        return "", 0, None
 
-async def extract_description_from_image(content: bytes, mime_type: str) -> str:
-    """Use Gemini Flash to describe the image content. Remains Async (I/O bound)."""
-    base64_image = base64.b64encode(content).decode('utf-8')
+def extract_text_from_docx_sync(content: bytes) -> Tuple[str, int]:
+    """Synchronous DOCX extraction using python-docx."""
+    import io
+    try:
+        doc = Document(io.BytesIO(content))
+        full_text = []
+        for para in doc.paragraphs:
+            full_text.append(para.text)
+        return "\n".join(full_text), 1
+    except Exception as e:
+        logger.error(f"DOCX extraction failed: {e}")
+        return "", 0
+
+async def extract_metadata_and_summary(text: str) -> dict:
+    """Use Gemini Flash to analyze document text and return key metadata."""
+    fallback = {
+        "summary": "No summary available.",
+        "suggested_filename": "unnamed_document",
+        "document_type": "unknown",
+        "tags": []
+    }
+
+    if not text or len(text.strip()) < 100:
+        return fallback
+
+    # 1. Truncation Strategy
+    max_chars = 40000
+    if len(text) > max_chars:
+        front_text = text[:12000]
+        back_text = text[-3000:]
+        trunc_text = front_text + "\n\n...[DOCUMENT TRUNCATED]...\n\n" + back_text
+    else:
+        trunc_text = text
+    
+    # 2. Forcing JSON Schema
+    prompt = f"""
+    You are an expert data librarian categorizing documents for a vector database.
+    Analyze the following document content and extract key metadata.
+    
+    You MUST respond with a raw JSON object containing EXACTLY these four keys:
+    1. "summary": A single, cohesive paragraph (under 200 words) summarizing the core topics and entities. No lists.
+    2. "suggested_filename": A highly descriptive file name using snake_case (e.g., q3_financial_report_2024). Do not include file extensions.
+    3. "document_type": A 1-to-3 word category (e.g., Legal Contract, Invoice, Research Paper).
+    4. "tags": An array of 3 to 5 highly relevant string keywords.
+    
+    CONTENT:
+    {trunc_text}
+    """
     
     try:
         response = await client.chat.completions.create(
-            model="google/gemini-3-flash-preview",
+            model="xiaomi/mimo-v2-flash",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600, 
+            temperature=0.0,
+            response_format={"type": "json_object"}
+        )
+        
+        raw_content = response.choices[0].message.content.strip()
+        if raw_content.startswith("```json"):
+            raw_content = raw_content.strip("```json").strip("```").strip()
+            
+        return json.loads(raw_content)
+    except Exception as e:
+        logger.error(f"Metadata extraction error: {e}")
+        return fallback
+
+async def extract_description_from_image(content: bytes, mime_type: str) -> dict:
+    """Use Gemini Flash to describe the image content and extract structured metadata."""
+    base64_image = base64.b64encode(content).decode('utf-8')
+    
+    fallback = {
+        "summary": "An image file.",
+        "suggested_filename": "uploaded_image",
+        "document_type": "Image",
+        "tags": []
+    }
+
+    prompt = """
+    You are an expert data librarian. Analyze the following image.
+    
+    You MUST respond with a raw JSON object containing EXACTLY these four keys:
+    1. "summary": A descriptive paragraph of the visual content and any text found.
+    2. "suggested_filename": A highly descriptive file name using snake_case. Do not include file extensions.
+    3. "document_type": A category (e.g., Photograph, Screenshot, Invoice, Chart).
+    4. "tags": 3 to 5 relevant keywords.
+    """
+    
+    try:
+        response = await client.chat.completions.create(
+            model="qwen/qwen3.5-flash-02-23",
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Describe the content of this image in detail for indexing purposes. Include any visible text."},
+                        {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
                             "image_url": {
@@ -65,169 +173,148 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> str:
                     ]
                 }
             ],
-            max_tokens=1000
+            max_tokens=1000,
+            response_format={"type": "json_object"}
         )
-        return response.choices[0].message.content or ""
+        
+        raw_content = response.choices[0].message.content.strip()
+        if raw_content.startswith("```json"):
+            raw_content = raw_content.strip("```json").strip("```").strip()
+            
+        return json.loads(raw_content)
     except Exception as e:
-        print(f"OCR Error: {e}")
-        return ""
+        logger.error(f"Image Vision Error: {e}")
+        return fallback
 
 def _worker_analyze_text(text: str, filename: str, path: Optional[str], file_data: dict, page_count: Optional[int]) -> Dict:
-    """
-    Shared logic for Scrubbing and Language Detection.
-    Runs in a separate thread.
-    """
-    # Scrubbing (CPU Heavy Regex)
+    """Shared logic for Scrubbing. Runs in a separate thread."""
     scrubbed_text = scrub_pii(text)
     
-    # Language Detection (CPU Heavy Math)
-    language = "unk"
-    if len(scrubbed_text.strip()) > 50:
-        try:
-            language = detect(scrubbed_text)
-        except LangDetectException:
-            language = "unk"
-            
+    # Robust fallback calculation for size and type if not provided in file_data
+    file_size_kb = file_data.get('file_size_kb', 0)
+    if not file_size_kb and path and os.path.exists(path):
+        file_size_kb = round(os.path.getsize(path) / 1024, 2)
+        
+    file_type = file_data.get('file_type', 'unknown')
+    if file_type == 'unknown' and '.' in filename:
+        file_type = filename.split('.')[-1]
+    
     return {
         "filename": filename,
         "path": path,
         "text": scrubbed_text,
         "metadata": {
-            "file_size_kb": file_data.get('file_size_kb', 0),
-            "file_type": file_data.get('file_type', 'unknown'),
-            "page_count": page_count,
-            "language": language
+            "file_size_kb": file_size_kb,
+            "file_type": file_type,
+            "page_count": page_count
         }
     }
 
+def _helper_read_file(p: str) -> bytes:
+    """Synchronous file reader for offloading to threads."""
+    try:
+        with open(p, "rb") as f:
+            return f.read()
+    except Exception as e:
+        logger.error(f"Read error for {p}: {e}")
+        return b""
+
 def _worker_process_document_cpu(file_data: dict) -> Dict:
-    """
-    Handles PDF/DOCX/Text extraction + Scrubbing + Detection.
-    Runs entirely in a separate thread.
-    """
+    """Handles parsing + Scrubbing. Runs in a thread."""
     path = file_data.get('path')
+    content = b""
     if path:
-        try:
-            with open(path, "rb") as f:
-                content = f.read()
-        except Exception as e:
-            logger.error(f"Failed to lazy load {path}: {e}")
-            content = b""
+        content = _helper_read_file(path)
     else:
         content = file_data.get('content', b"")
         
     filename = file_data.get('filename', 'unnamed')
+    _, ext = os.path.splitext(filename.lower())
     
     text = ""
     page_count = None
+    rasterized_img = None
 
-    # 1. Extraction (CPU Heavy)
-    if filename.lower().endswith(".pdf"):
-        try:
-            text, page_count = extract_text_from_pdf_sync(content)
-        except Exception as e:
-            logger.error(f"PDF extraction error for {filename}: {e}")
-            text = ""
-    elif filename.lower().endswith(".docx"):
-        try:
-            text, page_count = extract_text_from_docx_sync(content)
-        except Exception as e:
-            logger.error(f"DOCX extraction error for {filename}: {e}")
-            text = ""
+    # 1. Generic PyMuPDF Handled Documents
+    if ext in PYMUPDF_DOC_EXTENSIONS:
+        text, page_count, rasterized_img = extract_text_with_pymupdf_sync(content, ext)
+    
+    # 2. Text/Code Files Handled by PyMuPDF
+    elif ext in PYMUPDF_TXT_EXTENSIONS:
+        text, page_count, _ = extract_text_with_pymupdf_sync(content, ext, is_text_file=True)
+        
+    # 3. DOCX (Legacy fallback if MuPDF version is old, though newer MuPDF handles it)
+    elif ext == ".docx":
+        text, page_count = extract_text_from_docx_sync(content)
+        
+    # 4. Global Fallback
     else:
-        # Plain text decoding
-        try:
-            text = content.decode("utf-8")[:4000]
-        except Exception as e:
-            logger.error(f"Text decode error for {filename}: {e}")
-            text = ""
+        try: text = content.decode("utf-8")[:8000]
+        except: text = ""
 
-    # 2. Analysis (CPU Heavy)
-    return _worker_analyze_text(text, filename, path, file_data, page_count)
+    result = _worker_analyze_text(text, filename, path, file_data, page_count)
+    if rasterized_img:
+        result["rasterized_image"] = rasterized_img
+        
+    return result
 
 async def process_single_file(file_data: dict) -> Dict:
+    """Main entry point for processing a single file."""
     filename = file_data.get('filename', 'unnamed')
     file_type = file_data.get('file_type', 'unknown')
     path = file_data.get('path')
 
-    # For Images (Async I/O + Threaded Analysis)
+    # Images (Direct Vision Path)
     if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-        content = file_data.get('content')
-        if content is None and path:
-             try:
-                 def _read_file(p):
-                     with open(p, "rb") as f: return f.read()
-                 content = await asyncio.to_thread(_read_file, path)
-             except Exception as e:
-                 logger.error(f"Failed to read image {path}: {e}")
-                 content = b""
+        content = await asyncio.to_thread(_helper_read_file, path) if path else file_data.get('content', b"")
+        mime_type = f"image/{file_type if file_type != 'jpg' else 'jpeg'}"
+        llm_data = await extract_description_from_image(content, mime_type) if content else {}
         
-        try:
-            mime_type = f"image/{file_type if file_type != 'jpg' else 'jpeg'}"
-            
-            # 1. Await the API call (Keep this on the main loop!)
-            text = await extract_description_from_image(content, mime_type) if content else ""
-        except Exception as e:
-            logger.error(f"Image vision error for {filename}: {e}")
-            text = ""
-            
-        # 2. Offload the scrubbing/detection of the image description to a thread
-        return await asyncio.to_thread(
-            _worker_analyze_text, 
-            text, filename, path, file_data, None
-        )
-
-    # For Documents (Pure CPU Offload)
-    else:
-        # Offload the entire chain (Extract -> Scrub -> Detect)
-        return await asyncio.to_thread(_worker_process_document_cpu, file_data)
-
-async def process_files(files_data: List[Dict]) -> List[Dict]:
-    seen_filenames = {}
-
-    # Prepare unique names and metadata
-    files_to_process = []
-    
-    # If we have two files with the same name, we need to make them unique
-    for file_item in files_data:
-        original_filename = file_item.get("filename", "unnamed")
-        base_name = original_filename.split("/")[-1].split("\\")[-1]
-        
-        if base_name in seen_filenames:
-            seen_filenames[base_name] += 1
-            name_part, ext = os.path.splitext(base_name)
-            filename = f"{name_part}-{seen_filenames[base_name]}{ext}"
-        else:
-            seen_filenames[base_name] = 0
-            filename = base_name
-            
-        # Defer reading content until absolutely necessary by workers
-        file_size_kb = 0
-        if "path" in file_item:
-            try:
-                file_size_kb = os.path.getsize(file_item["path"]) // 1024
-            except Exception as e:
-                logger.error(f"Failed to get size for {file_item['path']}: {e}")
-        elif "content" in file_item:
-            file_size_kb = len(file_item["content"]) // 1024
-        
-        file_type = filename.split('.')[-1].lower() if '.' in filename else "unknown"
-        
-        files_to_process.append({
-            "filename": filename,
-            "path": file_item.get("path"),
-            "content": file_item.get("content"),
-            "file_size_kb": file_size_kb,
-            "file_type": file_type
+        result = await asyncio.to_thread(_worker_analyze_text, llm_data.get("summary", ""), filename, path, file_data, None)
+        result["metadata"].update({
+            "summary": llm_data.get("summary", ""),
+            "suggested_filename": llm_data.get("suggested_filename", ""),
+            "document_type": llm_data.get("document_type", ""),
+            "tags": llm_data.get("tags", [])
         })
+        return result
 
-    # Create tasks for parallel processing
-    logger.info(f"Processing {len(files_to_process)} files concurrently...")
-    t0 = time.time()
+    # All other "Documents" (including SVGs)
+    else:
+        result = await asyncio.to_thread(_worker_process_document_cpu, file_data)
+        
+        # If we have a rasterized image (from a text-less SVG), use Vision LLM
+        if result.get("rasterized_image"):
+            llm_data = await extract_description_from_image(result["rasterized_image"], "image/png")
+            result["metadata"].update({
+                "summary": llm_data.get("summary", ""),
+                "suggested_filename": llm_data.get("suggested_filename", ""),
+                "document_type": llm_data.get("document_type", ""),
+                "tags": llm_data.get("tags", [])
+            })
+            # Remove image bytes before returning to avoid heavy payload in Celery
+            del result["rasterized_image"]
+        else:
+            text = result.get("text", "")
+            # Only summarize if there's enough content to be meaningful
+            if len(text) > 200:
+                llm_data = await extract_metadata_and_summary(text)
+                result["metadata"].update({
+                    "summary": llm_data.get("summary", ""),
+                    "suggested_filename": llm_data.get("suggested_filename", ""),
+                    "document_type": llm_data.get("document_type", ""),
+                    "tags": llm_data.get("tags", [])
+                })
+        return result
+
+async def process_files(files_to_process: List[Dict]) -> List[Dict]:
+    """Parallel process files with concurrency capping."""
+    sem = asyncio.Semaphore(10)
     
-    # Run all tasks concurrently
-    processed_files = await asyncio.gather(*[process_single_file(f) for f in files_to_process])
-    
-    logger.info(f"Parallel processing finished in {time.time() - t0:.2f}s")
-    
-    return processed_files
+    async def _safe_process(f: Dict) -> Dict:
+        async with sem:
+            return await process_single_file(f)
+            
+    tasks = [_safe_process(f) for f in files_to_process]
+    results = await asyncio.gather(*tasks)
+    return list(results)

@@ -6,6 +6,7 @@ import numpy as np
 import umap
 from sklearn.cluster import HDBSCAN
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import normalize
 import base64
 import asyncio
 from typing import List, Dict, Tuple, Any
@@ -23,20 +24,22 @@ warnings.filterwarnings("ignore", category=UserWarning, module="umap")
 def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Synchronous worker for dimensionality reduction and clustering.
+    Optimized for high recall (minimizing 'unsorted' noise).
     """
     init_mode = "random" if n_samples < 15 else "spectral"
-    n_neighbors = min(n_samples - 1, 15) 
     
     # 1. Dimensionality Reduction for Clustering
     if n_samples < 50:
-         # Use PCA for small datasets
+         # CRITICAL FIX: L2-normalize embeddings before PCA to preserve cosine relationships
+         normalized_embeddings = normalize(embeddings, norm='l2')
          n_components_pca = min(n_samples - 1, 10)
          pca = PCA(n_components=n_components_pca, random_state=42)
-         embeddings_for_clustering = pca.fit_transform(embeddings)
+         embeddings_for_clustering = pca.fit_transform(normalized_embeddings)
     else:
-         # Use UMAP for datasets >= 50
+         # CRITICAL FIX: Dynamically scale n_neighbors to prevent global topology distortion
+         n_neighbors_cluster = min(n_samples - 1, 15)
          reducer_cluster = umap.UMAP(
-            n_neighbors=15,
+            n_neighbors=n_neighbors_cluster,
             n_components=15,
             min_dist=0.0, 
             metric='cosine',
@@ -50,8 +53,9 @@ def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.n
     if n_samples <= 3:
          embeddings_for_viz = embeddings[:, :2] if embeddings.shape[1] >= 2 else embeddings
     else:
+         n_neighbors_viz = min(n_samples - 1, 15)
          reducer_viz = umap.UMAP(
-            n_neighbors=n_neighbors,
+            n_neighbors=n_neighbors_viz,
             n_components=2,
             min_dist=0.0, 
             metric='cosine',
@@ -64,35 +68,16 @@ def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.n
     # 3. Clustering (HDBSCAN)
     clusterer = HDBSCAN(
         min_cluster_size=2, 
-        min_samples=2,                  
+        min_samples=1,                  
         cluster_selection_method='leaf', 
-        metric='euclidean',
+        cluster_selection_epsilon=0.4,
+        metric='euclidean', 
+        allow_single_cluster=True, 
         n_jobs=1 
     )
     
     cluster_labels = clusterer.fit_predict(embeddings_for_clustering)
     
-    # # 4. Post-processing: force-assign any remaining noise (-1) to the nearest cluster.
-    # unique_labels = set(cluster_labels)
-    # if -1 in unique_labels:
-    #     # We have at least one valid cluster to map noise into
-    #     valid_labels = [l for l in unique_labels if l != -1]
-        
-    #     # Calculate centroids for each valid cluster
-    #     cluster_centers = {
-    #         l: np.mean(embeddings_for_clustering[cluster_labels == l], axis=0)
-    #         for l in valid_labels
-    #     }
-        
-    #     for i, label in enumerate(cluster_labels):
-    #         if label == -1:
-    #             point = embeddings_for_clustering[i]
-    #             # Find the nearest valid cluster based on Euclidean distance
-    #             nearest_label = min(
-    #                 valid_labels, 
-    #                 key=lambda l: np.linalg.norm(point - cluster_centers[l])
-    #             )
-    #             cluster_labels[i] = nearest_label
     return cluster_labels, embeddings_for_viz
 
 async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
@@ -111,9 +96,9 @@ async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
     
     # Give the model a diverse look at the cluster
     sample_blocks = []
-    for s in samples[:8]:
+    for s in samples[:5]:
         filename = s.get("filename", "Unknown")
-        excerpt = (s.get("text") or "")[:800]
+        excerpt = (s.get("text") or "")[:1000]
         sample_blocks.append(f"{filename} | {excerpt}")
 
     prompt += "\n---\n".join(sample_blocks)
@@ -175,37 +160,61 @@ async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
         logger.error(f"Summary generation error: {e}")
         return "An organized collection of documents."
 
-async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    Core ML Pipeline:
-    Returns (organized_data, dataset_summary)
-    """
+async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], str]:
     if not processed_data:
         return [], "No data."
 
-    # Combine filename and text for maximum signal in both clustering and search
-    texts = [f"Filename: {d['filename']} | {d.get('text') or ''}".strip() for d in processed_data]
+    texts = []
+    for d in processed_data:
+        meta = d.get("metadata", {})
+        summary = meta.get("summary", "")
+        
+        # 1. Clean the filename (strip extension, replace symbols with spaces)
+        raw_filename = d.get("filename", "unnamed")
+        clean_name = raw_filename.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ')
+        
+        tags_list = meta.get("tags", [])
+        tags_str = ", ".join(tags_list) if tags_list else ""
+        doc_type = meta.get("document_type", "")
+
+        components = [clean_name] # Always start with the cleaned filename
+        
+        if summary:
+            if doc_type: components.append(doc_type)
+            if tags_str: components.append(tags_str)
+            components.append(summary)
+            
+            signal = " - ".join(components) 
+        else:
+            raw_text = d.get('text', '') or ''
+            # Append raw text to the clean filename
+            signal = f"{clean_name} - {raw_text[:8000]}"
+            
+        texts.append(signal.strip())
+
     n_samples = len(texts)
     logger.info(f"Number of samples for ML processing: {n_samples}")
 
-
-
-
-    # 1. Embeddings (I/O Bound - Async)
     t0 = time.time()
-    embeddings = await get_embeddings(texts)
-    logger.info(f"Embeddings generated in {time.time() - t0:.2f}s")
-
-    # Generate sparse embeddings in batches to avoid timeouts on CPU
-    logger.info(f"Generating sparse embeddings for {n_samples} documents...")
-    all_sparse_embeddings = await generate_sparse_embeddings(texts, batch_size=32)
-    logger.info(f"Sparse embeddings successfully generated.")
+    
+    # 2. Execute Both Embedding Models Concurrently
+    logger.info(f"Generating Dense and Sparse embeddings concurrently for {n_samples} docs...")
+    
+    try:
+        embeddings, all_sparse_embeddings = await asyncio.gather(
+            get_embeddings(texts),
+            generate_sparse_embeddings(texts, batch_size=32)
+        )
+        logger.info(f"Both embedding sets generated successfully in {time.time() - t0:.2f}s")
+    except Exception as e:
+        logger.error(f"Failed during concurrent embedding generation: {e}")
+        raise
 
     # For tiny datasets, return immediately to avoid HDBSCAN/UMAP errors
     if n_samples < 2:
         logger.info("Tiny dataset detected, skipping complex clustering.")
         for i, d in enumerate(processed_data):
-            d["folder"] = "Unsorted"
+            d["folder"] = "Miscellaneous"
             d["x"], d["y"] = 0.0, 0.0
             # Safety check: if embeddings is a numpy array, it has .tolist()
             d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
@@ -244,7 +253,7 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
             })
 
         # Data for summary task (take up to 2 snippets of this cluster for more variety)
-        category_name = cluster_id if cluster_id != -1 else "Unsorted"
+        category_name = cluster_id if cluster_id != -1 else "Miscellaneous"
         for s in cluster_samples[:2]:
             summary_sampling_data.append({
                 "category": category_name,
@@ -252,7 +261,7 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
             })
 
         if cluster_id == -1:
-            cluster_names[cluster_id] = "Unsorted"
+            cluster_names[cluster_id] = "Miscellaneous"
         else:
             label_tasks.append(get_cluster_label(cluster_samples))
             cluster_ids_for_tasks.append(cluster_id)
@@ -301,11 +310,6 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
             # Dummy coords for tiny datasets to prevent UI crash
             text_to_coords[text] = {"x": float(i), "y": float(i)}
 
-    # Generate sparse embeddings in batches to avoid timeouts on CPU
-    logger.info(f"Generating sparse embeddings for {n_samples} documents...")
-    all_sparse_embeddings = await generate_sparse_embeddings(texts, batch_size=32)
-    logger.info(f"Sparse embeddings successfully generated.")
-
     # Final mapping of results (folders, coords, embeddings) to processed_data
     for i, d in enumerate(processed_data):
         combined_text = texts[i]
@@ -316,6 +320,10 @@ async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[Lis
         
         # Store both dense and sparse embeddings for persistence 
         d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
-        d["sparse_embedding"] = all_sparse_embeddings[i]
+        
+        sparse_vec = all_sparse_embeddings[i] if i < len(all_sparse_embeddings) else {}
+        if not sparse_vec:
+            logger.warning(f"Sparse embedding for {d['filename']} is EMPTY")
+        d["sparse_embedding"] = sparse_vec
         
     return processed_data, dataset_summary

@@ -15,11 +15,18 @@
 
 ## Supported File Types
 
-The processing engine currently supports the following document and image formats:
+The processing engine leverages **PyMuPDF (MuPDF)** and **LLM Vision** to support a wide range of document, image, and code formats:
 
-- **Documents:** PDF (`.pdf`), Word (`.docx`), and Plain Text (`.txt`).
-- **Images (OCR):** PNG, JPG, JPEG, and WebP.
-- **Scalability:** Large documents are sampled (first few pages/paragraphs) to ensure rapid response times during clustering.
+- **Documents & eBooks**: PDF (`.pdf`), XPS (`.xps`), EPUB (`.epub`), MOBI (`.mobi`), FB2 (`.fb2`), CBZ (`.cbz`).
+- **Images & Graphics**: 
+    - **Standard Images**: PNG, JPG, JPEG, WebP (processed via Vision LLM).
+    - **Vector Graphics**: SVG (natively parsed for text; automatically rasterized for Vision analysis if text-less).
+- **Office Documents**: Word Documents (`.docx`).
+- **Code & Plain Text**: Over 20+ text-based formats are supported using PyMuPDF's low-latency text engine, including:
+    - **Web**: `.html`, `.css`, `.js`, `.ts`, `.tsx`, `.jsx`.
+    - **Systems/Scripts**: `.py`, `.sh`, `.bash`, `.yml`, `.yaml`, `.json`, `.xml`.
+    - **Languages**: `.c`, `.cpp`, `.h`, `.cs`, `.java`, `.go`, `.rs`, `.sql`.
+    - **Docs**: `.md`, `.txt`, `.ini`, `.conf`.
 
 ## Implementation Status & Limitations
 
@@ -35,12 +42,12 @@ This is an active prototype. Please note the following implementation details:
 
 1. **Ingestion:** Files are uploaded via the **Next.js 15** frontend and initially processed by **FastAPI**.
 2. **Asynchronous Task:** Ingestion triggers a **Celery** background worker to handle the heavy lifting:
-   - **OCR & Extraction:** Processes images (OCR), PDFs, and Word docs into clean text snippets.
-   - **Multi-Vector Embedding:**
-     - **Dense:** Generates semantic embeddings via OpenRouter (Qwen).
-     - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
-   - **Clustering:** Reduces dimensions with UMAP & PCA and groups documents with HDBSCAN.
-   - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
+    - **Universal Extraction:** Leverages **PyMuPDF** to parse 20+ file formats (EPUB, XPS, SVG, Source Code, etc.) with a **Vision Fallback** (rasterizing text-less SVGs for multimodal analysis).
+    - **Multi-Vector Embedding:**
+      - **Dense:** Generates semantic embeddings via OpenRouter (Qwen).
+      - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
+    - **Clustering:** Reduces dimensions with UMAP & PCA and groups documents with HDBSCAN (refined by `cluster_selection_epsilon` for fewer fractured clusters).
+    - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
 3. **Storage:** Metadata and vectors are stored in **TimescaleDB (PostgreSQL)** using `pgvector` and `pgvectorscale`.
 4. **Discovery:** Users can perform **Hybrid Search** across the processed dataset or explore the interactive 2D map.
 
@@ -49,7 +56,7 @@ This is an active prototype. Please note the following implementation details:
 - **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS, Framer Motion, Recharts.
 - **Backend:** FastAPI (Python 3.11), Celery, SQLAlchemy.
 - **Inference Service:** HuggingFace Text Embeddings Inference (TEI) running SPLADE (naver/splade-cocondenser-ensembledistil).
-- **Machine Learning:** UMAP-learn, PCA, HDBSCAN, Scikit-learn, LangDetect.
+- **Machine Learning:** UMAP-learn, PCA, HDBSCAN, Scikit-learn, PyMuPDF (fitz), pymupdf4llm.
 - **Database:** TimescaleDB (PostgreSQL 16) with `pgvector` and `pgvectorscale` for vector similarity search.
 - **Infrastructure:** Docker & Docker Compose, Redis (Task Queue), GitHub Actions (CI/CD).
 
@@ -64,7 +71,7 @@ This is an active prototype. Please note the following implementation details:
 │   │   ├── tasks.py             # Background ML pipeline tasks
 │   │   ├── api/                 # API Endpoints (documents.py for Upload, Search, Results)
 │   │   ├── services/
-│   │   │   ├── processing.py    # OCR, PDF/Doc parsing, Language detection
+│   │   │   ├── processing.py    # Multi-format extraction (PyMuPDF + Vision)
 │   │   │   ├── ml_engine.py     # Clustering, Reduction, AI Labeling
 │   │   │   └── embeddings.py    # Dense & Sparse embedding clients
 │   │   └── models/              # Pydantic & SQLAlchemy schema definitions
