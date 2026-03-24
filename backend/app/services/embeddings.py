@@ -11,22 +11,8 @@ from app.services.openai_client import client
 logger = logging.getLogger(__name__)
 
 # Create a semaphore to limit concurrent API calls to OpenRouter (e.g., 5 at a time)
-MAX_CONCURRENT_EMBEDDING_BATCHES = 5
+MAX_CONCURRENT_EMBEDDING_BATCHES = 15
 embedding_semaphore = asyncio.Semaphore(MAX_CONCURRENT_EMBEDDING_BATCHES)
-
-# Shared client to be reused
-_client_http = None
-
-def get_http_client():
-    global _client_http
-    if _client_http is None or _client_http.is_closed:
-        _client_http = httpx.AsyncClient(timeout=20.0)
-    return _client_http
-
-async def close_http_client():
-    global _client_http
-    if _client_http is not None and not _client_http.is_closed:
-        await _client_http.aclose()
 
 MAX_CONCURRENT_SPLADE_BATCHES = 10
 splade_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPLADE_BATCHES)
@@ -61,16 +47,16 @@ async def generate_sparse_embeddings(texts: List[str], batch_size: int = 32) -> 
     if not texts:
         return []
         
-    client_http = get_http_client()
-    total_batches = (len(texts) - 1) // batch_size + 1
-    
-    tasks = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
-        batch_idx = (i // batch_size) + 1
-        tasks.append(_fetch_sparse_batch(client_http, batch, batch_idx, total_batches))
+    async with httpx.AsyncClient(timeout=20.0) as client_http:
+        total_batches = (len(texts) - 1) // batch_size + 1
         
-    results = await asyncio.gather(*tasks)
+        tasks = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            batch_idx = (i // batch_size) + 1
+            tasks.append(_fetch_sparse_batch(client_http, batch, batch_idx, total_batches))
+            
+        results = await asyncio.gather(*tasks)
     
     # Flatten the results
     return [emb for batch_result in results for emb in batch_result]

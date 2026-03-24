@@ -7,7 +7,6 @@ import base64
 import httpx
 import fitz # PyMuPDF
 import pymupdf4llm
-from docx import Document
 from typing import List, Dict, Tuple, Optional, Any
 from app.services.privacy import scrub_pii
 from app.services.openai_client import client
@@ -20,7 +19,10 @@ logger = logging.getLogger(__name__)
 logging.getLogger("fitz").setLevel(logging.ERROR)
 
 # Extensions that PyMuPDF handles natively as documents
-PYMUPDF_DOC_EXTENSIONS = {".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg"}
+PYMUPDF_DOC_EXTENSIONS = {
+    ".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg",
+    ".docx", ".pptx", ".xlsx", ".hwp", ".hwpx"
+}
 
 # Extensions that should be opened as text by PyMuPDF
 PYMUPDF_TXT_EXTENSIONS = {
@@ -40,7 +42,9 @@ def extract_text_with_pymupdf_sync(content: bytes, extension: str, is_text_file:
         
         # Use pymupdf4llm for markdown extraction if it's a standard document
         # For text files or simple SVGs, standard extraction might be cleaner
-        if not is_text_file and extension.lower() in {".pdf", ".epub", ".mobi"}:
+        if not is_text_file and extension.lower() in {
+            ".pdf", ".epub", ".mobi", ".docx", ".pptx", ".xlsx", ".hwp", ".hwpx"
+        }:
             md_text = pymupdf4llm.to_markdown(doc)
         else:
             # Join text from all pages
@@ -68,18 +72,6 @@ def extract_text_with_pymupdf_sync(content: bytes, extension: str, is_text_file:
         logger.error(f"PyMuPDF ({extension}) extraction failed: {e}")
         return "", 0, None
 
-def extract_text_from_docx_sync(content: bytes) -> Tuple[str, int]:
-    """Synchronous DOCX extraction using python-docx."""
-    import io
-    try:
-        doc = Document(io.BytesIO(content))
-        full_text = []
-        for para in doc.paragraphs:
-            full_text.append(para.text)
-        return "\n".join(full_text), 1
-    except Exception as e:
-        logger.error(f"DOCX extraction failed: {e}")
-        return "", 0
 
 async def extract_metadata_and_summary(text: str) -> dict:
     """Use Gemini Flash to analyze document text and return key metadata."""
@@ -94,7 +86,7 @@ async def extract_metadata_and_summary(text: str) -> dict:
         return fallback
 
     # 1. Truncation Strategy
-    max_chars = 40000
+    max_chars = 15000
     if len(text) > max_chars:
         front_text = text[:12000]
         back_text = text[-3000:]
@@ -121,6 +113,14 @@ async def extract_metadata_and_summary(text: str) -> dict:
         response = await client.chat.completions.create(
             model="xiaomi/mimo-v2-flash",
             messages=[{"role": "user", "content": prompt}],
+            extra_body={
+                "provider": {
+                    "sort": "throughput", 
+                    "preferred_min_throughput": {
+                        'p90': 25, 
+                    }
+                }
+            },
             max_tokens=600, 
             temperature=0.0,
             response_format={"type": "json_object"}
@@ -134,6 +134,7 @@ async def extract_metadata_and_summary(text: str) -> dict:
     except Exception as e:
         logger.error(f"Metadata extraction error: {e}")
         return fallback
+
 
 async def extract_description_from_image(content: bytes, mime_type: str) -> dict:
     """Use Gemini Flash to describe the image content and extract structured metadata."""
@@ -186,6 +187,7 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> dict
         logger.error(f"Image Vision Error: {e}")
         return fallback
 
+
 def _worker_analyze_text(text: str, filename: str, path: Optional[str], file_data: dict, page_count: Optional[int]) -> Dict:
     """Shared logic for Scrubbing. Runs in a separate thread."""
     scrubbed_text = scrub_pii(text)
@@ -210,6 +212,7 @@ def _worker_analyze_text(text: str, filename: str, path: Optional[str], file_dat
         }
     }
 
+
 def _helper_read_file(p: str) -> bytes:
     """Synchronous file reader for offloading to threads."""
     try:
@@ -218,6 +221,7 @@ def _helper_read_file(p: str) -> bytes:
     except Exception as e:
         logger.error(f"Read error for {p}: {e}")
         return b""
+
 
 def _worker_process_document_cpu(file_data: dict) -> Dict:
     """Handles parsing + Scrubbing. Runs in a thread."""
@@ -239,17 +243,13 @@ def _worker_process_document_cpu(file_data: dict) -> Dict:
     if ext in PYMUPDF_DOC_EXTENSIONS:
         text, page_count, rasterized_img = extract_text_with_pymupdf_sync(content, ext)
     
-    # 2. Text/Code Files Handled by PyMuPDF
+    # 3. Text/Code Files Handled by PyMuPDF
     elif ext in PYMUPDF_TXT_EXTENSIONS:
         text, page_count, _ = extract_text_with_pymupdf_sync(content, ext, is_text_file=True)
         
-    # 3. DOCX (Legacy fallback if MuPDF version is old, though newer MuPDF handles it)
-    elif ext == ".docx":
-        text, page_count = extract_text_from_docx_sync(content)
-        
     # 4. Global Fallback
     else:
-        try: text = content.decode("utf-8")[:8000]
+        try: text = content.decode("utf-8")[:15000]
         except: text = ""
 
     result = _worker_analyze_text(text, filename, path, file_data, page_count)
@@ -257,6 +257,7 @@ def _worker_process_document_cpu(file_data: dict) -> Dict:
         result["rasterized_image"] = rasterized_img
         
     return result
+
 
 async def process_single_file(file_data: dict) -> Dict:
     """Main entry point for processing a single file."""
@@ -307,9 +308,10 @@ async def process_single_file(file_data: dict) -> Dict:
                 })
         return result
 
+
 async def process_files(files_to_process: List[Dict]) -> List[Dict]:
     """Parallel process files with concurrency capping."""
-    sem = asyncio.Semaphore(10)
+    sem = asyncio.Semaphore(30)
     
     async def _safe_process(f: Dict) -> Dict:
         async with sem:
