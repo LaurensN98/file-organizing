@@ -43,14 +43,34 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         avg_size_kb = round(total_size_kb / total_files, 1) if total_files else 0
         unique_clusters = list(set(d["folder"] for d in organized_data))
         
-        # 3. Zip organized files to disk
+        # 3. Zip organized files to disk with collision handling
         zip_path = f"/app/uploads/batch_{batch_id}_organized.zip"
+        used_arcnames = set()
+        
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, False) as zip_file:
             for item in organized_data:
-                if item.get("path"):
-                    zip_file.write(item["path"], arcname=f"{item['folder']}/{item['filename']}")
+                folder = item.get("folder", "Miscellaneous")
+                orig_filename = item["filename"]
+                
+                # Check for collisions in the same folder
+                arcname = f"{folder}/{orig_filename}"
+                cnt = 1
+                while arcname in used_arcnames:
+                    # Rename if collision exists: file.pdf -> file(1).pdf
+                    name_parts = orig_filename.rsplit('.', 1)
+                    if len(name_parts) > 1:
+                        new_name = f"{name_parts[0]}({cnt}).{name_parts[1]}"
+                    else:
+                        new_name = f"{orig_filename}({cnt})"
+                    arcname = f"{folder}/{new_name}"
+                    cnt += 1
+                
+                used_arcnames.add(arcname)
+                
+                if item.get("path") and os.path.exists(item["path"]):
+                    zip_file.write(item["path"], arcname=arcname)
                 elif item.get("content"):
-                    zip_file.writestr(f"{item['folder']}/{item['filename']}", item["content"])
+                    zip_file.writestr(arcname, item["content"])
         
         # Redis client to flag completion (no heavy payload)
         redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -83,11 +103,15 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
                 file_size_kb=meta.get("file_size_kb"),
                 file_type=meta.get("file_type"),
                 page_count=meta.get("page_count"),
-                language=meta.get("language", "en"),
                 x_coord=item.get("x"),
                 y_coord=item.get("y"),
                 dense_embedding=item.get("dense_embedding"),
-                sparse_embedding=item.get("sparse_embedding")
+                sparse_embedding=item.get("sparse_embedding"),
+                # LLM Metadata
+                summary=meta.get("summary"),
+                suggested_filename=meta.get("suggested_filename"),
+                document_type=meta.get("document_type"),
+                tags=meta.get("tags")
             )
             db.add(metadata)
         

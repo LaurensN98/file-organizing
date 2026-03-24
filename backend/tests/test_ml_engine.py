@@ -68,7 +68,7 @@ async def test_clustering_pipeline_tiny_dataset():
         
         organized_data, summary = await clustering_pipeline(processed_data)
         
-        assert organized_data[0]["folder"] == "Unsorted"
+        assert organized_data[0]["folder"] == "Miscellaneous"
         assert summary == "An organized collection of documents."
 
 

@@ -41,19 +41,13 @@ def upload_documents(files: List[UploadFile] = File(...)):
         import re
         
         def secure_filename(filename: str) -> str:
-            # Prevent path traversal while preserving directory structures and spaces
+            # Strictly preserve only the basename of the file to prevent redundant folders
             if not filename: return "unnamed_file"
             
-            # Remove any path traversal constructs
-            filename = filename.replace("..\\", "").replace("../", "")
+            # Extract basename to strip any uploaded directory structure
+            # (Works for both / and \ regardless of the server OS)
+            filename = os.path.basename(filename.replace("\\", "/"))
             
-            # Normalize slashes
-            filename = filename.replace("\\", "/")
-            
-            # Strip leading slashes to prevent absolute path injection
-            while filename.startswith("/"):
-                filename = filename[1:]
-                
             # Replace genuinely invalid file characters depending on OS (Windows/Linux)
             filename = re.sub(r'[<>:"|?*]', '_', filename)
             
@@ -69,9 +63,15 @@ def upload_documents(files: List[UploadFile] = File(...)):
             with open(file_path, "wb") as f:
                 f.write(content)
                 
+            # Pre-calculate size and type to pass to the processing pipeline
+            file_size_kb = round(len(content) / 1024, 2)
+            file_extension = safe_name.split('.')[-1] if '.' in safe_name else 'unknown'
+
             raw_files_data.append({
                 "filename": safe_name,
-                "path": str(file_path)
+                "path": str(file_path),
+                "file_size_kb": file_size_kb,
+                "file_type": file_extension
             })
         process_upload_task.delay(str(batch.id), raw_files_data)
         return {"batch_id": str(batch.id)}
@@ -117,7 +117,10 @@ def get_results(batch_id: str):
                 "file_size_kb": doc.file_size_kb,
                 "file_type": doc.file_type,
                 "page_count": doc.page_count,
-                "language": doc.language
+                "summary": doc.summary,
+                "suggested_filename": doc.suggested_filename,
+                "document_type": doc.document_type,
+                "tags": doc.tags
             }
         } for doc in batch.documents]
         # Check if the ZIP file path exists in Redis
