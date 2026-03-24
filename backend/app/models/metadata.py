@@ -29,10 +29,15 @@ class DocumentMetadata(Base):
     file_size_kb = Column(Integer)
     file_type = Column(String(20))
     page_count = Column(Integer, nullable=True)
-    language = Column(String(10), nullable=True)
     cluster_label = Column(String)
     x_coord = Column(Float, nullable=True)
     y_coord = Column(Float, nullable=True)
+    
+    # LLM Extracted Metadata for UI and smarter clustering
+    summary = Column(Text, nullable=True)
+    suggested_filename = Column(String, nullable=True)
+    document_type = Column(String(50), nullable=True)
+    tags = Column(JSONB, nullable=True)
     
     processed_at = Column(DateTime, default=datetime.datetime.utcnow)
 
