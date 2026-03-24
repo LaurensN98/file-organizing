@@ -5,6 +5,7 @@ import io
 import zipfile
 import logging
 import time
+import datetime
 import shutil
 import redis
 from app.core.config import settings
@@ -29,14 +30,14 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         db.commit()
 
         # 1. Initial Processing (Text extraction, PII scrubbing)
+        t_start = time.time()
         processed_data = await process_files(files_data)
+        logger.info(f"File processing completed in {time.time() - t_start:.2f}s for {len(files_data)} files")
 
-        start_time = time.time()
-        
         # 2. ML Pipeline: Embed, Reduce, Cluster, Label
         organized_data, dataset_description = await clustering_pipeline(processed_data)
         
-        # 2. Calculate Stats
+        # 2.1 Calculate Stats
         total_files = len(organized_data)
         total_size_kb = sum(d["metadata"]["file_size_kb"] for d in organized_data)
         largest_file_kb = max(d["metadata"]["file_size_kb"] for d in organized_data) if organized_data else 0
@@ -79,21 +80,8 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
         # Schedule physical file cleanup to match the 1-hour Redis TTL
         cleanup_zip_task.apply_async((zip_path,), countdown=3600)
         
-        processing_time = round(time.time() - start_time, 2)
-        
-        # 4. Save Results
-        batch.summary = {
-            "total_files": total_files,
-            "total_size_kb": total_size_kb,
-            "avg_size_kb": avg_size_kb,
-            "largest_file_kb": largest_file_kb,
-            "processing_time_sec": processing_time,
-            "cluster_count": len(unique_clusters),
-            "description": dataset_description
-        }
-        
-        batch.status = "SUCCESS"
-        
+
+        # 4. Save structured results to Database session
         for item in organized_data:
             meta = item.get("metadata", {})
             metadata = DocumentMetadata(
@@ -114,6 +102,20 @@ async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
                 tags=meta.get("tags")
             )
             db.add(metadata)
+        
+        # 5. Finalize Batch Status and Total Duration (includes DB transaction time)
+        elapsed = (datetime.datetime.utcnow() - batch.created_at).total_seconds()
+        
+        batch.status = "SUCCESS"
+        batch.summary = {
+            "total_files": total_files,
+            "total_size_kb": total_size_kb,
+            "avg_size_kb": avg_size_kb,
+            "largest_file_kb": largest_file_kb,
+            "processing_time_sec": round(elapsed, 2),
+            "cluster_count": len(unique_clusters),
+            "description": dataset_description
+        }
         
         db.commit()
         
