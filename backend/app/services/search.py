@@ -124,8 +124,12 @@ async def hybrid_search(
     # 2. Optional Reranking Step
     if rerank and top_candidate_ids:
         try:
-            # Prepare query and documents (using summary as the context)
-            documents_to_rerank = [doc_map[doc_id].summary or doc_map[doc_id].filename for doc_id in top_candidate_ids]
+            # 2. Enrich context for the VL-reranker
+            # Combining filename and summary provides a more complete 'document image' for the model.
+            documents_to_rerank = [
+                f"File: {doc_map[doc_id].filename}\nSummary: {doc_map[doc_id].summary or 'No summary.'}"
+                for doc_id in top_candidate_ids
+            ]
             
             # DeepInfra call
             rerank_response = await deepinfra_client.rerank(

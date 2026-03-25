@@ -77,7 +77,12 @@ async def _fetch_embedding_batch(batch: List[str], batch_idx: int) -> List[List[
         try:
             response = await client.embeddings.create(
                 input=batch,
-                model="qwen/qwen3-embedding-8b"
+                model="qwen/qwen3-embedding-8b",
+                extra_body={
+                    "provider": {
+                        "order": ["Nebius"]
+                    }
+                }
             )
             return [data.embedding for data in response.data]
         except Exception as e:
