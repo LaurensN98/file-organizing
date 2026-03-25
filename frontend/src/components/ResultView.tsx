@@ -15,7 +15,7 @@ import {
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import ClusterMap from "@/components/ClusterMap";
-import { MapSkeleton } from "@/components/ResultSkeleton";
+import { MapSkeleton, SearchSkeleton } from "@/components/ResultSkeleton";
 
 export interface AnalysisItem {
   id: string;
@@ -398,7 +398,9 @@ export default function ResultView({
         )}
 
         <div className="grid grid-cols-1 gap-8">
-          {status === "PROCESSING" && analysis.length === 0 ? (
+          {isSearching ? (
+            <SearchSkeleton />
+          ) : status === "PROCESSING" && analysis.length === 0 ? (
             /* Folders Skeleton List */
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
@@ -513,9 +515,9 @@ export default function ResultView({
 
                         {doc.metadata.tags && doc.metadata.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-50">
-                            {doc.metadata.tags.map((tag) => (
+                            {doc.metadata.tags.map((tag, idx) => (
                               <span
-                                key={tag}
+                                key={`${tag}-${idx}`}
                                 className="text-[9px] font-bold text-[#4A80A6]/70 bg-[#4A80A6]/5 px-2 py-0.5 rounded-md"
                               >
                                 #{tag}
@@ -680,14 +682,16 @@ export default function ResultView({
                                       {file.metadata.tags &&
                                         file.metadata.tags.length > 0 && (
                                           <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-50">
-                                            {file.metadata.tags.map((tag) => (
-                                              <span
-                                                key={tag}
-                                                className="text-[9px] font-bold text-[#4A80A6]/70 bg-[#4A80A6]/5 px-2 py-0.5 rounded-md"
-                                              >
-                                                #{tag}
-                                              </span>
-                                            ))}
+                                            {file.metadata.tags.map(
+                                              (tag, idx) => (
+                                                <span
+                                                  key={`${tag}-${idx}`}
+                                                  className="text-[9px] font-bold text-[#4A80A6]/70 bg-[#4A80A6]/5 px-2 py-0.5 rounded-md"
+                                                >
+                                                  #{tag}
+                                                </span>
+                                              ),
+                                            )}
                                           </div>
                                         )}
                                     </motion.div>

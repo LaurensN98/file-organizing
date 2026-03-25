@@ -1,10 +1,9 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import Image from "next/image";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Maximize2, Move, Search } from "lucide-react";
+import { Maximize2, Move, Search } from "lucide-react";
 import { AnalysisItem } from "@/components/ResultView";
 
 const CLUSTER_COLORS = [
@@ -299,45 +298,91 @@ export default function ClusterMap({
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed pointer-events-none z-[999] bg-white/95 backdrop-blur-xl border border-white shadow-2xl rounded-2xl p-4 min-w-[200px]"
+            className="fixed pointer-events-none z-[999] bg-white text-[#203047] p-5 rounded-[24px] shadow-2xl border border-gray-100 min-w-[320px] max-w-[340px]"
             style={{
-              left: mousePos.x + 15,
-              top: mousePos.y + 15,
+              left: mousePos.x + 20,
+              top: mousePos.y + 20,
             }}
           >
-            <div className="flex items-start gap-3">
+            <div className="flex items-center gap-2 mb-4">
               <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  color: hoveredPoint.color,
-                }}
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: hoveredPoint.color }}
+              />
+              <span
+                className="text-[10px] uppercase tracking-widest font-black"
+                style={{ color: hoveredPoint.color, opacity: 0.6 }}
               >
-                <Image
-                  src="/images/document.png"
-                  alt="File"
-                  width={18}
-                  height={18}
-                  className="w-8"
-                />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-[#203047] truncate mb-0.5">
-                  {hoveredPoint.filename}
-                </p>
-                <p
-                  className="text-[10px] font-bold uppercase tracking-tight"
+                AI Metadata Insight
+              </span>
+            </div>
+
+            <div className="mb-4">
+              <span className="text-[11px] text-gray-400 block mb-1">
+                Document Path
+              </span>
+              <span className="text-xs font-bold text-[#203047] block truncate">
+                {hoveredPoint.folder} / {hoveredPoint.filename}
+              </span>
+            </div>
+
+            {hoveredPoint.metadata.suggested_filename && (
+              <div className="mb-4">
+                <span className="text-[11px] text-gray-400 block mb-1">
+                  Proposed Filename
+                </span>
+                <span
+                  className="text-xs font-bold break-all leading-tight"
                   style={{ color: hoveredPoint.color }}
                 >
-                  {hoveredPoint.folder}
+                  {hoveredPoint.metadata.suggested_filename}
+                </span>
+              </div>
+            )}
+
+            {hoveredPoint.metadata.document_type && (
+              <div className="mb-4">
+                <span className="text-[11px] text-gray-400 block mb-1">
+                  Classification
+                </span>
+                <span className="text-xs font-bold bg-gray-50 text-gray-600 px-2 py-1 rounded-lg border border-gray-100">
+                  {hoveredPoint.metadata.document_type}
+                </span>
+              </div>
+            )}
+
+            {hoveredPoint.metadata.summary && (
+              <div className="mb-4">
+                <span className="text-[11px] text-gray-400 block mb-1.5">
+                  AI Summary
+                </span>
+                <p className="text-xs leading-relaxed text-gray-600 font-medium italic">
+                  &ldquo;{hoveredPoint.metadata.summary}&rdquo;
                 </p>
-                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-                  <div className="text-[10px] text-gray-400 font-medium">
-                    {hoveredPoint.metadata.file_size_kb} KB
-                  </div>
-                  <div className="text-[9px] bg-gray-50 px-2 py-0.5 rounded-full text-gray-500 font-bold uppercase">
-                    {hoveredPoint.metadata.file_type}
-                  </div>
+              </div>
+            )}
+
+            {hoveredPoint.metadata.tags &&
+              hoveredPoint.metadata.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-50">
+                  {hoveredPoint.metadata.tags.map((tag, idx) => (
+                    <span
+                      key={`${tag}-${idx}`}
+                      className="text-[9px] font-bold bg-gray-50 px-2 py-0.5 rounded-md"
+                      style={{ color: hoveredPoint.color }}
+                    >
+                      #{tag}
+                    </span>
+                  ))}
                 </div>
+              )}
+
+            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between opacity-60">
+              <div className="text-[10px] text-gray-400 font-medium">
+                {hoveredPoint.metadata.file_size_kb} KB
+              </div>
+              <div className="text-[9px] bg-gray-50 px-2 py-0.5 rounded-full text-gray-500 font-bold uppercase transition-colors">
+                {hoveredPoint.metadata.file_type}
               </div>
             </div>
           </motion.div>

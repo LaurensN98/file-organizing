@@ -20,13 +20,18 @@ export function StatsSkeleton() {
 export function MapSkeleton() {
   return (
     <div className="bg-white rounded-3xl h-[600px] border border-gray-100 shadow-sm mb-8 relative overflow-hidden animate-pulse">
-      <div className="absolute top-6 left-6 flex flex-col gap-2">
-        <div className="h-4 w-48 bg-gray-100 rounded" />
-        <div className="h-2 w-32 bg-gray-50 rounded" />
+      <div className="absolute top-8 left-8 flex flex-col gap-2 opacity-30">
+        <div className="h-6 w-56 bg-gray-100 rounded-lg" />
+        <div className="h-3 w-64 bg-gray-50 rounded-lg" />
       </div>
-      <div className="w-full h-full flex flex-col items-center justify-center gap-2">
-        <Loader2 className="text-gray-200 animate-spin" size={48} />
-        <p className="text-gray-400">Organizing your files...</p>
+      <div className="w-full h-full flex flex-col items-center justify-center gap-6">
+        <div className="relative">
+          <Loader2 className="text-gray-200 animate-spin" size={64} />
+          <div className="absolute inset-0 bg-blue-100/10 blur-xl rounded-full" />
+        </div>
+        <p className="text-gray-400 font-medium tracking-tight">
+          Synthesizing semantic space...
+        </p>
       </div>
     </div>
   );
@@ -38,17 +43,43 @@ export function FoldersSkeleton() {
       {[1, 2, 3].map((i) => (
         <div
           key={i}
-          className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm animate-pulse"
+          className="bg-white rounded-3xl border border-gray-100 shadow-sm animate-pulse"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between px-6 py-6">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-gray-100 rounded-2xl" />
+              <div className="w-10 h-10 bg-gray-100 rounded-xl" />
               <div>
                 <div className="h-5 w-48 bg-gray-200 rounded mb-2" />
                 <div className="h-3 w-24 bg-gray-100 rounded" />
               </div>
             </div>
-            <div className="w-6 h-6 bg-gray-100 rounded" />
+            <div className="w-5 h-5 bg-gray-100 rounded" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SearchSkeleton() {
+  return (
+    <div className="space-y-2 animate-pulse">
+      <div className="flex items-center justify-between mb-4 px-2">
+        <div className="h-6 w-40 bg-gray-200 rounded" />
+        <div className="h-3.5 w-28 bg-gray-100 rounded" />
+      </div>
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <div
+          key={i}
+          className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 bg-gray-100 rounded-lg" />
+            <div className="h-4 w-48 md:w-64 bg-gray-200 rounded" />
+          </div>
+          <div className="flex items-center gap-3 shrink-0 ml-4">
+            <div className="w-14 h-4 bg-gray-100 rounded-full" />
+            <div className="w-12 h-3 bg-gray-50 rounded" />
           </div>
         </div>
       ))}
