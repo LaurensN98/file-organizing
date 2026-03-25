@@ -438,7 +438,7 @@ export default function ResultView({
               {filteredAnalysis.map((doc) => (
                 <div key={doc.id} className="relative group/file">
                   <div
-                    className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100 group transition-all hover:border-blue-200 hover:shadow-sm cursor-help"
+                    className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100 group transition-all hover:border-blue-200 hover:shadow-sm"
                     onMouseEnter={() => setHoveredFileId(doc.id)}
                     onMouseLeave={() => setHoveredFileId(null)}
                   >
@@ -597,12 +597,12 @@ export default function ResultView({
                           {folderFiles.map((file, idx) => (
                             <div key={idx} className="relative group/file">
                               <div
-                                className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-gray-100 group transition-all hover:border-[#4A80A6]/30 hover:shadow-md hover:shadow-blue-500/5"
+                                className="flex items-center justify-between p-2.5 bg-white rounded-2xl border border-gray-100 group transition-all hover:border-[#4A80A6]/30 hover:shadow-md hover:shadow-blue-500/5"
                                 onMouseEnter={() => setHoveredFileId(file.id)}
                                 onMouseLeave={() => setHoveredFileId(null)}
                               >
                                 <div className="flex items-center gap-4 overflow-hidden">
-                                  <div className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors">
+                                  <div className="flex items-center justify-center rounded-lg transition-colors">
                                     <Image
                                       src="/images/document.png"
                                       alt="Doc"
