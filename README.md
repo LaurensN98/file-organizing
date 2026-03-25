@@ -8,7 +8,7 @@
 
 - **AI-Powered Labeling:** Automatically generates semantic folder names and dataset summaries using LLMs (MiMo v2 Flash).
 - **Unsupervised Clustering:** Uses **UMAP** and **PCA** for dimensionality reduction and **HDBSCAN** for density-based document grouping.
-- **Hybrid Search:** Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Relative Score Fusion (RSF) with alpha-weighting to prioritize exact keyword matching.
+- **Hybrid Search + Reranking:** A high-precision 2-stage retrieval pipeline. Combines **Dense Vector Search** (semantic) with **Sparse Retrieval** (SPLADE/Keyword-aware) via Relative Score Fusion (RSF), followed by a final **Reranking** pass using **DeepInfra (Llama-3-Nemotron)** to maximize relevance.
 - **Interactive visualization:** Explore your document landscape through a dynamic 2D scatter plot with zooming and metadata inspection.
 - **Asynchronous pipeline:** Scalable background processing using **Celery** and **Redis** for efficient large-scale file ingestion.
 - **Automated Organization:** Delivers organized file structures back to the user as a streamed ZIP file.
@@ -48,8 +48,7 @@ This is an active prototype. Please note the following implementation details:
       - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
     - **Clustering:** Reduces dimensions with UMAP & PCA and groups documents with HDBSCAN (refined by `cluster_selection_epsilon` for fewer fractured clusters).
     - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
-3. **Storage:** Metadata and vectors are stored in **TimescaleDB (PostgreSQL)** using `pgvector` and `pgvectorscale`.
-4. **Discovery:** Users can perform **Hybrid Search** across the processed dataset or explore the interactive 2D map.
+- **Discovery:** Users can perform **Hybrid Search** with an automated **Reranking** step (via DeepInfra) for ultra-precise results or explore the interactive 2D map.
 
 ### Tech Stack
 
@@ -57,7 +56,8 @@ This is an active prototype. Please note the following implementation details:
 - **Backend:** FastAPI (Python 3.11), Celery, SQLAlchemy.
 - **Inference Service:** HuggingFace Text Embeddings Inference (TEI) running SPLADE (naver/splade-cocondenser-ensembledistil).
 - **Machine Learning:** UMAP-learn, PCA, HDBSCAN, Scikit-learn, PyMuPDF (fitz), pymupdf4llm.
-- **Database:** TimescaleDB (PostgreSQL 16) with `pgvector` and `pgvectorscale` for vector similarity search.
+- **Database:** TimescaleDB (PostgreSQL 16) with `pgvector` and `pgvectorscale` (DiskANN) for large-scale vector similarity search.
+- **Reranking:** DeepInfra (nvidia/llama-nemotron-rerank-vl-1b-v2) for 2-stage retrieval precision.
 - **Infrastructure:** Docker & Docker Compose, Redis (Task Queue), GitHub Actions (CI/CD).
 
 ## Directory Structure
@@ -93,6 +93,7 @@ This is an active prototype. Please note the following implementation details:
 
 - Docker & Docker Compose
 - OpenRouter API Key (for LLM and Dense Embeddings)
+- DeepInfra API Key (for high-precision Reranking)
 
 ### Installation
 
@@ -122,10 +123,11 @@ This is an active prototype. Please note the following implementation details:
 
    # API Keys
    OPENROUTER_API_KEY=your_openrouter_key
+   DEEPINFRA_API_KEY=your_deepinfra_key
 
    # Services URLs
    REDIS_URL=redis://redis:6379/0
-   INFERENCE_URL=http://inference:7997/v1
+   INFERENCE_URL=http://host.docker.internal:8081
    DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
    ```
 
@@ -159,7 +161,35 @@ This is an active prototype. Please note the following implementation details:
 | **Security**         | Internal AI Network             | HTTPS (TLS 1.3) + Private VPC               |
 | **PII Handling**     | Placeholder Redaction           | Microsoft Presidio (Automated Redaction)    |
 
+## Usage Costs & Efficiency (Estimated)
+
+Neatly is designed for extreme cost-efficiency by leveraging high-performance, low-cost models via DeepInfra and OpenRouter. Below is a breakdown of the estimated costs per document and per search query.
+
+### 1. Ingestion & Indexing (Per Document)
+These costs are incurred once per document during the initial upload and processing phase.
+
+| Task | Model | Avg. tokens | Cost per 1M tokens | Est. Cost / Doc |
+| :--- | :--- | :--- | :--- | :--- |
+| **Text Summarization** | MiMo v2 Flash | 5.5k (In) / 150 (Out) | $0.10 (In) / $0.30 (Out) | ~$0.000595 |
+| **Image Vision** | Qwen 3.5 Flash | 2.5k (In) / 150 (Out) | $0.10 (In) / $0.40 (Out) | ~$0.00031 |
+| **Embedding** | Qwen 8B | 150 (In) | $0.01 | ~$0.0000015 |
+
+*   **Total Indexing Cost:** At most **$0.0005965 per document**.
+*   **Efficiency:** You can index **~1,700 documents for $1.00**. In practice, this number is often much higher (3k+) as many documents are shorter than the 5.5k token maximum.
+
+### 2. Search & Discovery (Per Query)
+These costs are incurred when performing a search with the automated reranking stage enabled.
+
+| Task | Model | Avg. tokens | Cost per 1M tokens | Est. Cost / Query |
+| :--- | :--- | :--- | :--- | :--- |
+| **Reranking** | Llama-3-Nemotron | 150 per doc (x25 docs) | $0.01 | ~$0.0000375 |
+
+*   **Efficiency:** You can perform approximately **26,500 high-precision reranked searches for $1.00**.
+
+---
+
 ## GDPR & Security Compliance
+...
 
 This architecture ensures **Data Minimization** through a multi-stage security pipeline:
 

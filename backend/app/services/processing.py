@@ -100,7 +100,7 @@ async def extract_metadata_and_summary(text: str) -> dict:
     Analyze the following document content and extract key metadata.
     
     You MUST respond with a raw JSON object containing EXACTLY these four keys:
-    1. "summary": A single, cohesive paragraph (under 200 words) summarizing the core topics and entities. No lists.
+    1. "summary": A single, cohesive paragraph of about 100-150 words (under 200 words) summarizing the core topics and entities. No lists.
     2. "suggested_filename": A highly descriptive file name using snake_case (e.g., q3_financial_report_2024). Do not include file extensions.
     3. "document_type": A 1-to-3 word category (e.g., Legal Contract, Invoice, Research Paper).
     4. "tags": An array of 3 to 5 highly relevant string keywords.
@@ -137,7 +137,7 @@ async def extract_metadata_and_summary(text: str) -> dict:
 
 
 async def extract_description_from_image(content: bytes, mime_type: str) -> dict:
-    """Use Gemini Flash to describe the image content and extract structured metadata."""
+    """Use Qwen 3.5 Flash to describe the image content and extract structured metadata."""
     base64_image = base64.b64encode(content).decode('utf-8')
     
     fallback = {
@@ -151,7 +151,7 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> dict
     You are an expert data librarian. Analyze the following image.
     
     You MUST respond with a raw JSON object containing EXACTLY these four keys:
-    1. "summary": A descriptive paragraph of the visual content and any text found.
+    1. "summary": A single, cohesive paragraph of about 100-150 words (under 200 words) summarizing the core topics and entities. No lists.
     2. "suggested_filename": A highly descriptive file name using snake_case. Do not include file extensions.
     3. "document_type": A category (e.g., Photograph, Screenshot, Invoice, Chart).
     4. "tags": 3 to 5 relevant keywords.
