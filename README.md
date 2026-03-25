@@ -18,15 +18,15 @@
 The processing engine leverages **PyMuPDF (MuPDF)** and **LLM Vision** to support a wide range of document, image, and code formats:
 
 - **Documents & eBooks**: PDF (`.pdf`), XPS (`.xps`), EPUB (`.epub`), MOBI (`.mobi`), FB2 (`.fb2`), CBZ (`.cbz`).
-- **Images & Graphics**: 
-    - **Standard Images**: PNG, JPG, JPEG, WebP (processed via Vision LLM).
-    - **Vector Graphics**: SVG (natively parsed for text; automatically rasterized for Vision analysis if text-less).
+- **Images & Graphics**:
+  - **Standard Images**: PNG, JPG, JPEG, WebP (processed via Vision LLM).
+  - **Vector Graphics**: SVG (natively parsed for text; automatically rasterized for Vision analysis if text-less).
 - **Office Documents**: Word Documents (`.docx`).
 - **Code & Plain Text**: Over 20+ text-based formats are supported using PyMuPDF's low-latency text engine, including:
-    - **Web**: `.html`, `.css`, `.js`, `.ts`, `.tsx`, `.jsx`.
-    - **Systems/Scripts**: `.py`, `.sh`, `.bash`, `.yml`, `.yaml`, `.json`, `.xml`.
-    - **Languages**: `.c`, `.cpp`, `.h`, `.cs`, `.java`, `.go`, `.rs`, `.sql`.
-    - **Docs**: `.md`, `.txt`, `.ini`, `.conf`.
+  - **Web**: `.html`, `.css`, `.js`, `.ts`, `.tsx`, `.jsx`.
+  - **Systems/Scripts**: `.py`, `.sh`, `.bash`, `.yml`, `.yaml`, `.json`, `.xml`.
+  - **Languages**: `.c`, `.cpp`, `.h`, `.cs`, `.java`, `.go`, `.rs`, `.sql`.
+  - **Docs**: `.md`, `.txt`, `.ini`, `.conf`.
 
 ## Implementation Status & Limitations
 
@@ -42,13 +42,14 @@ This is an active prototype. Please note the following implementation details:
 
 1. **Ingestion:** Files are uploaded via the **Next.js 15** frontend and initially processed by **FastAPI**.
 2. **Asynchronous Task:** Ingestion triggers a **Celery** background worker to handle the heavy lifting:
-    - **Universal Extraction:** Leverages **PyMuPDF** to parse 20+ file formats (EPUB, XPS, SVG, Source Code, etc.) with a **Vision Fallback** (rasterizing text-less SVGs for multimodal analysis).
-    - **Multi-Vector Embedding:**
-      - **Dense:** Generates semantic embeddings via OpenRouter (Qwen).
-      - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
-    - **Clustering:** Reduces dimensions with UMAP & PCA and groups documents with HDBSCAN (refined by `cluster_selection_epsilon` for fewer fractured clusters).
-    - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
-- **Discovery:** Users can perform **Hybrid Search** with an automated **Reranking** step (via DeepInfra) for ultra-precise results or explore the interactive 2D map.
+   - **Universal Extraction:** Leverages **PyMuPDF** to parse 20+ file formats (EPUB, XPS, SVG, Source Code, etc.) with a **Vision Fallback** (rasterizing text-less SVGs for multimodal analysis).
+   - **Multi-Vector Embedding:**
+     - **Dense:** Generates semantic embeddings via OpenRouter (Qwen).
+     - **Sparse:** Generates SPLADE embeddings via a local **Text Embeddings Inference (TEI)** service.
+   - **Clustering:** Reduces dimensions with UMAP & PCA and groups documents with HDBSCAN (refined by `cluster_selection_epsilon` for fewer fractured clusters).
+   - **Labeling:** LLMs analyze cluster centroids to generate concise folder names and a global summary via OpenRouter (MiMo v2 Flash).
+
+- **Discovery:** Users can perform **Hybrid Search** with an automated **Reranking** step (via DeepInfra) for precise results or explore the interactive 2D map.
 
 ### Tech Stack
 
@@ -166,30 +167,31 @@ This is an active prototype. Please note the following implementation details:
 Neatly is designed for extreme cost-efficiency by leveraging high-performance, low-cost models via DeepInfra and OpenRouter. Below is a breakdown of the estimated costs per document and per search query.
 
 ### 1. Ingestion & Indexing (Per Document)
+
 These costs are incurred once per document during the initial upload and processing phase.
 
-| Task | Model | Avg. tokens | Cost per 1M tokens | Est. Cost / Doc |
-| :--- | :--- | :--- | :--- | :--- |
-| **Text Summarization** | MiMo v2 Flash | 5.5k (In) / 150 (Out) | $0.10 (In) / $0.30 (Out) | ~$0.000595 |
-| **Image Vision** | Qwen 3.5 Flash | 2.5k (In) / 150 (Out) | $0.10 (In) / $0.40 (Out) | ~$0.00031 |
-| **Embedding** | Qwen 8B | 150 (In) | $0.01 | ~$0.0000015 |
+| Task                   | Model          | Avg. tokens           | Cost per 1M tokens       | Est. Cost / Doc |
+| :--------------------- | :------------- | :-------------------- | :----------------------- | :-------------- |
+| **Text Summarization** | MiMo v2 Flash  | 5.5k (In) / 150 (Out) | $0.10 (In) / $0.30 (Out) | ~$0.000595      |
+| **Image Vision**       | Qwen 3.5 Flash | 2.5k (In) / 150 (Out) | $0.10 (In) / $0.40 (Out) | ~$0.00031       |
+| **Embedding**          | Qwen 8B        | 150 (In)              | $0.01                    | ~$0.0000015     |
 
-*   **Total Indexing Cost:** At most **$0.0005965 per document**.
-*   **Efficiency:** You can index **~1,700 documents for $1.00**. In practice, this number is often much higher (3k+) as many documents are shorter than the 5.5k token maximum.
+- **Total Indexing Cost:** At most **$0.0005965 per document**.
+- **Efficiency:** You can index **~1,700 documents for $1.00**. In practice, this number is often much higher (3k+) as many documents are shorter than the 5.5k token maximum.
 
 ### 2. Search & Discovery (Per Query)
+
 These costs are incurred when performing a search with the automated reranking stage enabled.
 
-| Task | Model | Avg. tokens | Cost per 1M tokens | Est. Cost / Query |
-| :--- | :--- | :--- | :--- | :--- |
-| **Reranking** | Llama-3-Nemotron | 150 per doc (x25 docs) | $0.01 | ~$0.0000375 |
+| Task          | Model            | Avg. tokens            | Cost per 1M tokens | Est. Cost / Query |
+| :------------ | :--------------- | :--------------------- | :----------------- | :---------------- |
+| **Reranking** | Llama-3-Nemotron | 150 per doc (x25 docs) | $0.01              | ~$0.0000375       |
 
-*   **Efficiency:** You can perform approximately **26,500 high-precision reranked searches for $1.00**.
+- **Efficiency:** You can perform approximately **26,500 high-precision reranked searches for $1.00**.
 
 ---
 
 ## GDPR & Security Compliance
-...
 
 This architecture ensures **Data Minimization** through a multi-stage security pipeline:
 
