@@ -17,6 +17,12 @@ embedding_semaphore = asyncio.Semaphore(MAX_CONCURRENT_EMBEDDING_BATCHES)
 MAX_CONCURRENT_SPLADE_BATCHES = 10
 splade_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPLADE_BATCHES)
 
+# Shared client for connection pooling locally
+local_inference_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(120.0),
+    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)
+)
+
 async def _fetch_sparse_batch(client_http: httpx.AsyncClient, batch: List[str], batch_idx: int, total_batches: int) -> List[Dict[str, float]]:
     """Helper to fetch a single sparse embedding batch with semaphore limits."""
     # Strip and strictly truncate to 1500 characters (~300 tokens)
@@ -47,16 +53,15 @@ async def generate_sparse_embeddings(texts: List[str], batch_size: int = 32) -> 
     if not texts:
         return []
         
-    async with httpx.AsyncClient(timeout=20.0) as client_http:
-        total_batches = (len(texts) - 1) // batch_size + 1
+    total_batches = (len(texts) - 1) // batch_size + 1
+    
+    tasks = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        batch_idx = (i // batch_size) + 1
+        tasks.append(_fetch_sparse_batch(local_inference_client, batch, batch_idx, total_batches))
         
-        tasks = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            batch_idx = (i // batch_size) + 1
-            tasks.append(_fetch_sparse_batch(client_http, batch, batch_idx, total_batches))
-            
-        results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks)
     
     # Flatten the results
     return [emb for batch_result in results for emb in batch_result]
