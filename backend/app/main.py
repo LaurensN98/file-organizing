@@ -4,6 +4,7 @@ from app.api import documents
 from app.core.database import init_db
 from contextlib import asynccontextmanager
 import os
+from app.services.deepinfra_client import deepinfra_client
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,7 +13,8 @@ async def lifespan(app: FastAPI):
     print(f"DEBUG: OPENROUTER_API_KEY loaded: {key[:5]}... (len={len(key)})")
     init_db()
     yield
-    # Shutdown (no cleanup needed)
+    # Shutdown
+    await deepinfra_client.aclose()
 
 app = FastAPI(
     title="Neatly",
