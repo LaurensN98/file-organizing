@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
-    REDIS_URL: str = "redis://redis:6379/0"
     OPENROUTER_API_KEY: str = "dummy"
+    DEEPINFRA_API_KEY: str = "dummy"
+    REDIS_URL: str = "redis://redis:6379/0"
     INFERENCE_URL: str = "http://inference:80"
 
     model_config = {
