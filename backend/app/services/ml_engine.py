@@ -1,24 +1,48 @@
-import os
 import logging
 import warnings
 import time
+import re
 import numpy as np
 import umap
 from sklearn.cluster import HDBSCAN
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import normalize
-import base64
 import asyncio
-from typing import List, Dict, Tuple, Any
-from app.core.config import settings
-from app.services.openai_client import client
+from typing import List, Dict, Any, Coroutine, Union, Tuple
+from app.core.openai_client import openai_client
 from app.services.embeddings import get_embeddings, generate_sparse_embeddings
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
 # Suppress UMAP UserWarnings
 warnings.filterwarnings("ignore", category=UserWarning, module="umap")
+
+
+def _get_doc_signal(d: Dict[str, Any]) -> str:
+    """Combines filename and summary/text into a single embedding signal."""
+    meta = d.get("metadata", {})
+    summary = meta.get("summary", "")
+    
+    # 1. Clean the filename (strip extension, replace symbols with spaces)
+    raw_filename = d.get("filename", "unnamed")
+    clean_name = raw_filename.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ')
+    
+    if summary:
+        tags_list = meta.get("tags", [])
+        tags_str = ", ".join(tags_list) if tags_list else ""
+        doc_type = meta.get("document_type", "")
+        
+        components = [clean_name]
+        if doc_type: components.append(doc_type)
+        if tags_str: components.append(tags_str)
+        components.append(summary)
+        return " - ".join(components).strip()
+    
+    raw_text = d.get('text', '') or ''
+    return f"{clean_name} - {raw_text[:8000]}".strip()
 
 
 def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.ndarray, np.ndarray]:
@@ -80,6 +104,7 @@ def _worker_run_clustering(embeddings: np.ndarray, n_samples: int) -> tuple[np.n
     
     return cluster_labels, embeddings_for_viz
 
+
 async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
     """Generate a concise folder name by analyzing filenames and content snippets."""
     if not samples:
@@ -105,7 +130,7 @@ async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
     
     try:
         logger.info(f"Generating label for cluster with {len(samples)} documents...")
-        response = await client.chat.completions.create(
+        response = await openai_client.chat.completions.create(
             model="xiaomi/mimo-v2-flash", 
             extra_body={
                 "provider": {
@@ -123,28 +148,39 @@ async def get_cluster_label(samples: List[Dict[str, str]]) -> str:
         )
         content = response.choices[0].message.content
         if content:
-            logger.info(f"Raw Label result: {content[:100]}...")
-
-            # Clean up markdown, quotes, and common JSON artifacts
-            clean_content = content.strip().replace('"', '').replace("'", "").replace('{', '').replace('}', '').replace('*', '').replace('_', '').replace('#', '')
-            if ":" in clean_content and len(clean_content.split(":")) > 1:
-                # Handle cases like "Folder: Name"
-                clean_content = clean_content.split(":")[-1].strip()
+            # Clean up markdown and common artifacts safely
+            clean_content = content.replace('*', '').replace('#', '').replace('"', '').replace("'", "").strip()
+            
+            # If AI returned "Folder: Name", extract "Name"
+            if ":" in clean_content:
+                parts = clean_content.split(":")
+                if len(parts) > 1 and len(parts[-1].strip()) > 1:
+                    clean_content = parts[-1].strip()
+            
+            # FINAL GUARD: If cleaning made it empty, or it's still empty, use raw content or fallback
+            final_label = clean_content if len(clean_content) > 1 else content.strip()
+            
+            if not final_label or final_label.lower() == "none":
+                final_label = "Miscellaneous"
                 
-            return clean_content
+            logger.info(f"Final Label processed: {final_label}")
+            return final_label
+            
         return "Miscellaneous"
     except Exception as e:
         logger.error(f"Labeling error: {e}")
         return "Miscellaneous"
+
 
 async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
     """Generate a 1-3 sentence summary of the entire dataset based on cluster samples."""
     if not cluster_data:
         return "A collection of documents."
         
-    sample_texts = []
-    for item in cluster_data[:15]: # Up to 15 different clusters/docs
-        sample_texts.append(f"[Group: {item['category']}]: {item['text'][:300]}...")
+    sample_texts = [
+        f"[Group: {item['category']}]: {item['text'][:300]}..." 
+        for item in cluster_data[:15]
+    ]
 
     prompt = (
         "Analyze these document snippets, which have been grouped into logical categories. "
@@ -155,7 +191,7 @@ async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
 
     try:
         logger.info("Generating dataset summary...")
-        response = await client.chat.completions.create(
+        response = await openai_client.chat.completions.create(
             model="xiaomi/mimo-v2-flash",
             messages=[{"role": "user", "content": prompt}],
             extra_body={
@@ -176,37 +212,12 @@ async def generate_dataset_summary(cluster_data: List[Dict[str, Any]]) -> str:
         logger.error(f"Summary generation error: {e}")
         return "An organized collection of documents."
 
-async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], str]:
+
+async def clustering_pipeline(processed_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
     if not processed_data:
         return [], "No data."
 
-    texts = []
-    for d in processed_data:
-        meta = d.get("metadata", {})
-        summary = meta.get("summary", "")
-        
-        # 1. Clean the filename (strip extension, replace symbols with spaces)
-        raw_filename = d.get("filename", "unnamed")
-        clean_name = raw_filename.rsplit('.', 1)[0].replace('_', ' ').replace('-', ' ')
-        
-        tags_list = meta.get("tags", [])
-        tags_str = ", ".join(tags_list) if tags_list else ""
-        doc_type = meta.get("document_type", "")
-
-        components = [clean_name] # Always start with the cleaned filename
-        
-        if summary:
-            if doc_type: components.append(doc_type)
-            if tags_str: components.append(tags_str)
-            components.append(summary)
-            
-            signal = " - ".join(components) 
-        else:
-            raw_text = d.get('text', '') or ''
-            # Append raw text to the clean filename
-            signal = f"{clean_name} - {raw_text[:8000]}"
-            
-        texts.append(signal.strip())
+    texts = [_get_doc_signal(d) for d in processed_data]
 
     n_samples = len(texts)
     logger.info(f"Number of samples for ML processing: {n_samples}")
@@ -237,12 +248,14 @@ async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], s
             d["sparse_embedding"] = all_sparse_embeddings[i] if i < len(all_sparse_embeddings) else {}
         return processed_data, "An organized collection of documents."
 
-    
     # 2 & 3. Reduction & Clustering (CPU Bound - Offload to Thread)
     t1 = time.time()
     
+    # Ensure embeddings are a NumPy array to prevent shape/slice errors in worker
+    np_embeddings = np.array(embeddings)
+    
     cluster_labels, embeddings_for_viz = await asyncio.to_thread(
-        _worker_run_clustering, embeddings, n_samples
+        _worker_run_clustering, np_embeddings, n_samples
     )
 
     logger.info(f"UMAP & HDBSCAN took {time.time() - t1:.2f}s")
@@ -260,21 +273,20 @@ async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], s
         indices = [i for i, l in enumerate(cluster_labels) if l == cluster_id]
         
         # Build structured samples for labeling
-        cluster_samples = []
-        for idx in indices[:8]:
-            doc = processed_data[idx]
-            cluster_samples.append({
-                "filename": doc["filename"],
-                "text": (doc.get("text") or "")
-            })
+        cluster_samples = [
+            {"filename": processed_data[idx]["filename"], "text": (processed_data[idx].get("text") or "")}
+            for idx in indices[:8]
+        ]
 
         # Data for summary task (take up to 2 snippets of this cluster for more variety)
-        category_name = cluster_id if cluster_id != -1 else "Miscellaneous"
-        for s in cluster_samples[:2]:
-            summary_sampling_data.append({
+        category_name: Union[int, str] = cluster_id if cluster_id != -1 else "Miscellaneous"
+        summary_sampling_data.extend([
+            {
                 "category": category_name,
-                "text": f"{s['filename']} | {s['text'][:300]}..."
-            })
+                "text": f"{s.get('filename', 'Unknown')} | {str(s.get('text', ''))[:300]}..."
+            }
+            for s in cluster_samples[:2]
+        ])
 
         if cluster_id == -1:
             cluster_names[cluster_id] = "Miscellaneous"
@@ -288,7 +300,6 @@ async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], s
     
     # Check for exceptions in gather
     cleaned_results: List[Any] = []
-    # Use a copy to avoid slicing issues if needed, or just index safely
     for r in list(raw_results):
         if isinstance(r, Exception):
             logger.error(f"AI Task failed: {r}")
@@ -296,50 +307,65 @@ async def clustering_pipeline(processed_data: list[dict]) -> tuple[list[dict], s
         else:
             cleaned_results.append(r)
     
-    # Ensure dataset_summary is a string for logging
-    final_summary = str(cleaned_results[-1]) if len(cleaned_results) > 0 else "No summary."
+    # Summary is the last task, labels are everything before
+    final_summary_raw = cleaned_results[-1] if cleaned_results else "No summary."
+    final_summary: str = str(final_summary_raw)
     dataset_summary: str = final_summary
-    # Labels represent all results except the last one (summary)
-    labels: List[str] = [str(r) for idx, r in enumerate(cleaned_results) if idx < len(cleaned_results) - 1]
+    
+    # Extract labels (everything but the last element which is the summary)
+    raw_labels = [cleaned_results[i] for i in range(len(cleaned_results) - 1)] if len(cleaned_results) > 1 else []
+    labels: List[str] = [str(r) for r in raw_labels]
     
     logger.info(f"Summary result: {final_summary[:100]}...")
     
-    for cid, label in zip(cluster_ids_for_tasks, labels):
-        cluster_names[cid] = label
+    # 5. Build final map with standardized INT keys
+    # Clusters with the same AI name will naturally collapse into the same folder in the UI.
+    final_cluster_names = {-1: "Miscellaneous"}
+    
+    for cid_raw, label_raw in zip(cluster_ids_for_tasks, labels):
+        cid = int(cid_raw)
+        raw_name = str(label_raw).strip()
         
+        # Only use a generic fallback if the result is truly empty or 'none'
+        if not raw_name or raw_name.lower() in ["none", "null", ""] or len(raw_name) < 1:
+            name = f"Cluster {cid}"
+        else:
+            name = raw_name
+            
+        final_cluster_names[cid] = name
+        
+    logger.info(f"Final mapping generated: {final_cluster_names}")
     logger.info(f"Labeling & Summary took {time.time() - t3:.2f}s")
 
-    # Map texts back to folder names and coords
-    text_to_folder = {}
-    text_to_coords = {}
-    
-    for i, label in enumerate(cluster_labels):
-        text = texts[i]
-        text_to_folder[text] = cluster_names[label]
-        # Use the 2D visualization embeddings for coordinates
+    # 6. Final mapping of results (folders, coords, embeddings) directly to processed_data by index
+    for i, d in enumerate(processed_data):
+        # Explicitly cast to int for robust dict lookup
+        cluster_id = int(cluster_labels[i])
+        
+        # Standardize folder name with multi-level fallback
+        folder_name = final_cluster_names.get(cluster_id, "Miscellaneous")
+        d["folder"] = folder_name if folder_name and str(folder_name).strip() else "Miscellaneous"
+        
+        # Add 2D visualization embeddings for coordinates
         if n_samples > 3:
-            # Force conversion to numpy array to satisfy type checker if needed, 
-            # though it should already be one. 
             coords_row = np.asarray(embeddings_for_viz)[i]
-            text_to_coords[text] = {"x": float(coords_row[0]), "y": float(coords_row[1])}
+            d["x"] = float(coords_row[0])
+            d["y"] = float(coords_row[1])
         else:
             # Dummy coords for tiny datasets to prevent UI crash
-            text_to_coords[text] = {"x": float(i), "y": float(i)}
-
-    # Final mapping of results (folders, coords, embeddings) to processed_data
-    for i, d in enumerate(processed_data):
-        combined_text = texts[i]
-        d["folder"] = text_to_folder.get(combined_text, "Misc")
-        coords = text_to_coords.get(combined_text, {"x": 0.0, "y": 0.0})
-        d["x"] = coords["x"]
-        d["y"] = coords["y"]
+            d["x"] = float(i)
+            d["y"] = float(i)
         
         # Store both dense and sparse embeddings for persistence 
-        d["dense_embedding"] = embeddings[i].tolist() if i < len(embeddings) else None
+        dense_emb = embeddings[i] if i < len(embeddings) else None
+        if dense_emb is not None and hasattr(dense_emb, "tolist"):
+            d["dense_embedding"] = dense_emb.tolist()
+        else:
+            d["dense_embedding"] = dense_emb
         
         sparse_vec = all_sparse_embeddings[i] if i < len(all_sparse_embeddings) else {}
         if not sparse_vec:
-            logger.warning(f"Sparse embedding for {d['filename']} is EMPTY")
+            logger.warning(f"Sparse embedding for {d.get('filename', 'unnamed')} is EMPTY")
         d["sparse_embedding"] = sparse_vec
         
     return processed_data, dataset_summary
