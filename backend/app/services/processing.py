@@ -4,19 +4,34 @@ import asyncio
 import json
 import time
 import base64
-import httpx
-import fitz # PyMuPDF
+import fitz 
 import pymupdf4llm
+import zipfile
+import datetime
+import shutil
+
 from typing import List, Dict, Tuple, Optional, Any
 from app.services.privacy import scrub_pii
-from app.services.openai_client import client
-from app.core.config import settings
+from app.core.openai_client import openai_client
+from app.celery_app import celery_app
+from app.core.database import get_db_ctx
+from app.models.metadata import UploadBatch, DocumentMetadata
+from app.services.storage import get_unique_name
+from app.services.ml_engine import clustering_pipeline
+from app.core.redis_client import redis_client
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
+# Base directory for uploads
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/app/uploads")
+
+
 # Suppress fitz warnings
 logging.getLogger("fitz").setLevel(logging.ERROR)
+
 
 # Extensions that PyMuPDF handles natively as documents
 PYMUPDF_DOC_EXTENSIONS = {
@@ -24,12 +39,14 @@ PYMUPDF_DOC_EXTENSIONS = {
     ".docx", ".pptx", ".xlsx", ".hwp", ".hwpx"
 }
 
+
 # Extensions that should be opened as text by PyMuPDF
 PYMUPDF_TXT_EXTENSIONS = {
     ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".xml", ".html", ".css", 
     ".sql", ".md", ".sh", ".bash", ".yml", ".yaml", ".ini", ".conf", ".c", ".cpp", 
     ".h", ".cs", ".java", ".go", ".rs", ".rb", ".php"
 }
+
 
 def extract_text_with_pymupdf_sync(content: bytes, extension: str, is_text_file: bool = False) -> Tuple[str, int, Optional[bytes]]:
     """Generic PyMuPDF extractor for PDFs, eBooks, SVGs, and Text files."""
@@ -48,10 +65,7 @@ def extract_text_with_pymupdf_sync(content: bytes, extension: str, is_text_file:
             md_text = pymupdf4llm.to_markdown(doc)
         else:
             # Join text from all pages
-            text_parts = []
-            for page in doc:
-                text_parts.append(page.get_text())
-            md_text = "\n".join(text_parts)
+            md_text = "\n".join(page.get_text() for page in doc)
         
         # SVG Special Handling: If it's an SVG and we have no text, 
         # or it's a very small amount of text, rasterize it.
@@ -110,7 +124,7 @@ async def extract_metadata_and_summary(text: str) -> dict:
     """
     
     try:
-        response = await client.chat.completions.create(
+        response = await openai_client.chat.completions.create(
             model="xiaomi/mimo-v2-flash",
             messages=[{"role": "user", "content": prompt}],
             extra_body={
@@ -158,7 +172,7 @@ async def extract_description_from_image(content: bytes, mime_type: str) -> dict
     """
     
     try:
-        response = await client.chat.completions.create(
+        response = await openai_client.chat.completions.create(
             model="qwen/qwen3.5-flash-02-23",
             messages=[
                 {
@@ -201,7 +215,7 @@ def _worker_analyze_text(text: str, filename: str, path: Optional[str], file_dat
     if file_type == 'unknown' and '.' in filename:
         file_type = filename.split('.')[-1]
     
-    return {
+    res = {
         "filename": filename,
         "path": path,
         "text": scrubbed_text,
@@ -211,6 +225,12 @@ def _worker_analyze_text(text: str, filename: str, path: Optional[str], file_dat
             "page_count": page_count
         }
     }
+    
+    # CRITICAL: Preserve content bytes for in-memory files to prevent loss during zipping
+    if not path and "content" in file_data:
+        res["content"] = file_data["content"]
+        
+    return res
 
 
 def _helper_read_file(p: str) -> bytes:
@@ -310,13 +330,146 @@ async def process_single_file(file_data: dict) -> Dict:
 
 
 async def process_files(files_to_process: List[Dict]) -> List[Dict]:
-    """Parallel process files with concurrency capping."""
+    """Parallel process files with concurrency capping and error isolation."""
     sem = asyncio.Semaphore(30)
     
     async def _safe_process(f: Dict) -> Dict:
         async with sem:
-            return await process_single_file(f)
+            try:
+                return await process_single_file(f)
+            except Exception as e:
+                filename = f.get('filename', 'unnamed')
+                logger.error(f"Error processing file {filename}: {e}")
+                # Return a valid fallback dictionary to prevent breaking the entire batch gather
+                return {
+                    "filename": filename,
+                    "path": f.get('path'),
+                    "content": f.get('content'),
+                    "text": "",
+                    "metadata": {
+                        "file_size_kb": f.get('file_size_kb', 0),
+                        "file_type": filename.split('.')[-1] if '.' in filename else 'unknown',
+                        "page_count": 0,
+                        "error": str(e)
+                    }
+                }
             
     tasks = [_safe_process(f) for f in files_to_process]
     results = await asyncio.gather(*tasks)
     return list(results)
+
+
+def _create_zip_archive(zip_path: str, organized_data: List[Dict[str, Any]]):
+    """Synchronous worker for zip creation to avoid blocking the event loop."""
+    used_arcnames = set()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zip_file:
+        for item in organized_data:
+            folder = item.get("folder", "Miscellaneous")
+            orig_filename = item["filename"]
+            
+            # Check for collisions in the same folder using shared utility
+            arcname = get_unique_name(orig_filename, used_arcnames, folder=folder)
+            used_arcnames.add(arcname)
+            
+            if item.get("path") and os.path.exists(item["path"]):
+                zip_file.write(item["path"], arcname=arcname)
+            elif item.get("content"):
+                zip_file.writestr(arcname, item["content"])
+
+
+async def run_processing_pipeline(batch_id: str, files_data: List[Dict]):
+    with get_db_ctx() as db:
+        batch = db.get(UploadBatch, batch_id)
+        if not batch:
+            logger.error(f"Batch {batch_id} not found")
+            return
+
+        try:
+            batch.status = "PROCESSING"
+            db.commit()
+
+            # 1. Initial Processing (Text extraction, Document summarization, PII scrubbing)
+            t_start = time.time()
+            processed_data = await process_files(files_data)
+            logger.info(f"File processing completed in {time.time() - t_start:.2f}s for {len(files_data)} files")
+
+            # 2. ML Pipeline: Embed, Reduce, Cluster, Label
+            organized_data: List[Dict[str, Any]]
+            dataset_description: str
+            organized_data, dataset_description = await clustering_pipeline(processed_data)
+            
+            # 3. Calculate Stats
+            total_files = len(organized_data)
+            total_size_kb = sum(d["metadata"]["file_size_kb"] for d in organized_data)
+            unique_folders = sorted(list(set(d["folder"] for d in organized_data)))
+            
+            logger.info(f"Organized data count: {total_files}")
+            logger.info(f"Unique folders found: {unique_folders}")
+
+            # 4. Zip organized files to disk (Offloaded to thread to keep Event Loop responsive)
+            zip_filename = f"batch_{batch_id}_organized.zip"
+            zip_path = os.path.join(UPLOAD_DIR, zip_filename)
+            
+            await asyncio.to_thread(_create_zip_archive, zip_path, organized_data)
+            
+            redis_client.setex(f"batch_zip:{batch_id}", 3600, zip_path)
+            
+            # Schedule physical file cleanup to match the 1-hour Redis TTL
+            celery_app.send_task("cleanup_zip_task", args=[zip_path], countdown=3600)
+            
+            # 5. Save structured results to Database session
+            for item in organized_data:
+                meta = item.get("metadata", {})
+                metadata = DocumentMetadata(
+                    batch_id=batch.id,
+                    filename=item["filename"],
+                    cluster_label=item["folder"],
+                    file_size_kb=meta.get("file_size_kb"),
+                    file_type=meta.get("file_type"),
+                    page_count=meta.get("page_count"),
+                    x_coord=item.get("x"),
+                    y_coord=item.get("y"),
+                    dense_embedding=item.get("dense_embedding"),
+                    sparse_embedding=item.get("sparse_embedding"),
+                    summary=meta.get("summary"),
+                    suggested_filename=meta.get("suggested_filename"),
+                    document_type=meta.get("document_type"),
+                    tags=meta.get("tags")
+                )
+                db.add(metadata)
+            
+            # 6. Finalize Batch Status and Total Duration
+            # replacement for deprecated utcnow()
+            now = datetime.datetime.now(datetime.timezone.utc)
+            # Ensure batch.created_at is offset-aware for the subtraction
+            created_at = batch.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+            
+            elapsed = (now - created_at).total_seconds()
+            
+            batch.status = "SUCCESS"
+            batch.summary = {
+                "total_files": total_files,
+                "total_size_kb": total_size_kb,
+                "processing_time_sec": round(elapsed, 2),
+                "cluster_count": len(unique_folders),
+                "description": dataset_description
+            }
+            
+            db.commit()
+            
+            # Clean up the raw files off the disk physically ONLY after commit succeeds
+            try:
+                raw_files_dir = os.path.join(UPLOAD_DIR, batch_id)
+                if os.path.exists(raw_files_dir):
+                    shutil.rmtree(raw_files_dir)
+            except Exception as e:
+                logger.warning(f"Failed to clean up raw files for batch {batch_id}: {e}")
+                
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Task failed for batch {batch_id}: {e}")
+            batch.status = "FAILED"
+            batch.error_message = str(e)
+            db.commit()
