@@ -11,6 +11,7 @@ export default function FileUpload() {
   const router = useRouter();
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [consent, setConsent] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
@@ -25,6 +26,7 @@ export default function FileUpload() {
     if (files.length === 0 || !consent) return;
 
     setIsUploading(true);
+    setUploadProgress(0);
     console.log(`🚀 Starting upload of ${files.length} files...`);
     
     const formData = new FormData();
@@ -36,7 +38,14 @@ export default function FileUpload() {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const response = await axios.post(`${apiUrl}/api/upload`, formData);
+      const response = await axios.post(`${apiUrl}/api/upload`, formData, {
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percentCompleted);
+          }
+        }
+      });
       
       console.log("✅ Upload successful! Batch ID:", response.data.batch_id);
       
@@ -46,6 +55,7 @@ export default function FileUpload() {
       console.error("❌ Upload failed", error);
       alert("Something went wrong with the upload. Please check your connection or try fewer files.");
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -157,6 +167,7 @@ export default function FileUpload() {
               src="/images/upload-icon.png"
               alt="Upload"
               fill
+              sizes="96px"
               className="object-contain group-hover:scale-110 transition-transform duration-500"
             />
           </div>
@@ -235,20 +246,30 @@ export default function FileUpload() {
         disabled={files.length === 0 || !consent || isUploading}
         type="button"
         className={clsx(
-          "w-full h-12 rounded-2xl text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-300",
+          "relative w-full h-12 rounded-2xl text-sm font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-300 overflow-hidden",
           isUploading || files.length === 0 || !consent
             ? "bg-gray-100 text-gray-400 cursor-not-allowed"
             : "bg-[#4A80A6] text-white hover:bg-[#3A7096] active:scale-[0.98] shadow-lg shadow-[#4A80A6]/20",
         )}
       >
-        {isUploading ? (
-          <>
-            <Loader2 size={18} className="animate-spin" />
-            Organizing...
-          </>
-        ) : (
-          "Start Organization"
+        {/* Progress Bar Background fill */}
+        {isUploading && uploadProgress > 0 && (
+          <div 
+            className="absolute left-0 top-0 h-full bg-[#4A80A6]/20 transition-all duration-300" 
+            style={{ width: `${uploadProgress}%` }}
+          />
         )}
+        
+        <div className="relative z-10 flex items-center gap-2">
+          {isUploading ? (
+            <>
+              <Loader2 size={18} className="animate-spin" />
+              {uploadProgress < 100 ? `Uploading... ${uploadProgress}%` : "Organizing..."}
+            </>
+          ) : (
+            "Start Organization"
+          )}
+        </div>
       </button>
     </div>
   );

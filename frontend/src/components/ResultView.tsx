@@ -11,6 +11,8 @@ import {
   Download,
   ArrowLeft,
   Loader2,
+  Zap,
+  Brain,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
@@ -39,8 +41,6 @@ export interface AnalysisItem {
 export interface SummaryData {
   total_files: number;
   total_size_kb: number;
-  avg_size_kb: number;
-  largest_file_kb: number;
   processing_time_sec: number;
   cluster_count: number;
   description: string;
@@ -78,6 +78,7 @@ export default function ResultView({
   const [expandedFolders, setExpandedFolders] = useState<
     Record<string, boolean>
   >({});
+  const [rerankEnabled, setRerankEnabled] = useState(false);
 
   const fetchResults = async () => {
     try {
@@ -120,8 +121,13 @@ export default function ResultView({
     setIsSearching(true);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const response = await axios.post(`${apiUrl}/api/vector-search`, null, {
-        params: { query: searchQuery, limit: 25, batch_id: batchId },
+      const response = await axios.get(`${apiUrl}/api/vector-search`, {
+        params: {
+          query: searchQuery,
+          limit: 25,
+          batch_id: batchId,
+          rerank: rerankEnabled,
+        },
       });
       // The endpoint returns a list of {id, filename, folder, score}
       const scoreMap: Record<string, number> = {};
@@ -361,7 +367,7 @@ export default function ResultView({
           )}
         </div>
 
-        <div className="mb-8 flex items-center">
+        <div className="mb-8 flex items-center gap-4">
           <div className="relative flex-1">
             <Search
               className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
@@ -384,6 +390,43 @@ export default function ResultView({
                 <Loader2 className="animate-spin text-blue-600" size={16} />
               </div>
             )}
+          </div>
+
+          <div className="relative flex items-center bg-gray-100/70 p-1 rounded-2xl shrink-0 h-[48px] w-[200px] border border-gray-200/50">
+            {/* Animated Sliding Background */}
+            <motion.div
+              className="absolute top-1 bottom-1 w-[95px] rounded-xl shadow-sm border border-black/5 bg-white"
+              initial={false}
+              animate={{
+                x: rerankEnabled ? 95 : 0,
+              }}
+              transition={{ type: "spring", stiffness: 500, damping: 35 }}
+            />
+
+            <button
+              onClick={() => setRerankEnabled(false)}
+              className={clsx(
+                "relative z-10 w-1/2 flex items-center justify-center gap-1.5 h-full rounded-xl text-xs tracking-wide font-extrabold transition-colors duration-200",
+                !rerankEnabled
+                  ? "text-red-600"
+                  : "text-gray-400 hover:text-gray-600",
+              )}
+            >
+              <Zap size={14} fill={!rerankEnabled ? "currentColor" : "none"} />
+              FAST
+            </button>
+            <button
+              onClick={() => setRerankEnabled(true)}
+              className={clsx(
+                "relative z-10 w-1/2 flex items-center justify-center gap-1.5 h-full rounded-xl text-xs tracking-wide font-extrabold transition-colors duration-200",
+                rerankEnabled
+                  ? "text-purple-600"
+                  : "text-gray-400 hover:text-gray-600",
+              )}
+            >
+              <Brain size={14} fill={rerankEnabled ? "currentColor" : "none"} />
+              DEEP
+            </button>
           </div>
         </div>
         {!vectorResultScores && (
