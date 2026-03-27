@@ -1,8 +1,9 @@
 from openai import AsyncOpenAI
 from app.core.config import settings
 
-# Initialize client for OpenRouter 
-client = AsyncOpenAI(
+
+# Shared client for connection pooling locally
+openai_client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=settings.OPENROUTER_API_KEY,
     timeout=60.0,

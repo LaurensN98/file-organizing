@@ -1,7 +1,6 @@
-from app.services.deepinfra_client import deepinfra_client
+from app.core.deepinfra_client import deepinfra_client
 
-# This correctly calls the DeepInfra inference endpoint for reranking
-# Example based on DeepInfra documentation
+
 async def get_reranked_scores(queries: list[str], documents: list[str]):
     """
     Reranks a list of documents against a set of queries.
@@ -13,3 +12,4 @@ async def get_reranked_scores(queries: list[str], documents: list[str]):
         documents=documents
     )
     return response.get("scores")
+    

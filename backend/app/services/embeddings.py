@@ -2,26 +2,24 @@ import logging
 import asyncio
 import httpx
 import numpy as np
-import traceback
-from typing import List, Dict, Any
+from typing import List, Dict
 from app.core.config import settings
-from app.services.openai_client import client
+from app.core.openai_client import openai_client
+from app.core.inference_client import local_inference_client
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create a semaphore to limit concurrent API calls to OpenRouter (e.g., 5 at a time)
+
+# Create a semaphore to limit concurrent API calls to OpenRouter 
 MAX_CONCURRENT_EMBEDDING_BATCHES = 15
 embedding_semaphore = asyncio.Semaphore(MAX_CONCURRENT_EMBEDDING_BATCHES)
 
+# Create a semaphore to limit concurrent API calls to local inference server
 MAX_CONCURRENT_SPLADE_BATCHES = 10
 splade_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SPLADE_BATCHES)
 
-# Shared client for connection pooling locally
-local_inference_client = httpx.AsyncClient(
-    timeout=httpx.Timeout(120.0),
-    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)
-)
 
 async def _fetch_sparse_batch(client_http: httpx.AsyncClient, batch: List[str], batch_idx: int, total_batches: int) -> List[Dict[str, float]]:
     """Helper to fetch a single sparse embedding batch with semaphore limits."""
@@ -48,6 +46,7 @@ async def _fetch_sparse_batch(client_http: httpx.AsyncClient, batch: List[str], 
             logger.exception(f"SPLADE batch {batch_idx} failed or timed out")
             return [{} for _ in safe_batch]
 
+
 async def generate_sparse_embeddings(texts: List[str], batch_size: int = 32) -> List[Dict[str, float]]:
     """Fetch sparse embeddings in parallel batches to optimize throughput on GPU/Metal."""
     if not texts:
@@ -66,16 +65,18 @@ async def generate_sparse_embeddings(texts: List[str], batch_size: int = 32) -> 
     # Flatten the results
     return [emb for batch_result in results for emb in batch_result]
 
+
 async def generate_sparse_embedding(text: str) -> Dict[str, float]:
     """Singular version for compatibility with existing code."""
     res = await generate_sparse_embeddings([text])
     return res[0] if res else {}
 
+
 async def _fetch_embedding_batch(batch: List[str], batch_idx: int) -> List[List[float]]:
     """Internal helper to fetch a single batch of embeddings with error handling."""
     async with embedding_semaphore:
         try:
-            response = await client.embeddings.create(
+            response = await openai_client.embeddings.create(
                 input=batch,
                 model="qwen/qwen3-embedding-8b",
                 extra_body={
@@ -89,7 +90,8 @@ async def _fetch_embedding_batch(batch: List[str], batch_idx: int) -> List[List[
             error_details = getattr(e, "body", str(e))
             logger.error(f"Embedding error in batch {batch_idx}: {error_details}")
             # Returning None entries prevents silent misalignment for downstream documents.
-            return [None] * len(batch)
+            return [[0.0] * 4096 for _ in range(len(batch))]
+
 
 async def get_embeddings(texts: List[str]) -> np.ndarray:
     """Fetch embeddings from OpenRouter using Qwen model in parallel batches."""
@@ -106,4 +108,3 @@ async def get_embeddings(texts: List[str]) -> np.ndarray:
     # Flatten the results
     all_embeddings = [emb for batch_result in results for emb in batch_result]
     return np.array(all_embeddings)
-

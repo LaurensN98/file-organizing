@@ -1,6 +1,7 @@
 import httpx
 from app.core.config import settings
 
+
 class DeepInfraClient:
     """Wrapper for DeepInfra API that handles specialized inference."""
     def __init__(self, api_key: str):
@@ -31,5 +32,6 @@ class DeepInfraClient:
         """Close the internal httpx client properly."""
         await self.client.aclose()
 
-# Export an instance
+
+# Shared client for connection pooling locally
 deepinfra_client = DeepInfraClient(settings.DEEPINFRA_API_KEY)

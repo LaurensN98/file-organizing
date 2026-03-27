@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 
+
 class Settings(BaseSettings):
     POSTGRES_USER: str = "user"
     POSTGRES_PASSWORD: str = "password"
@@ -20,5 +21,6 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "extra": "ignore"
     }
+
 
 settings = Settings()
