@@ -14,8 +14,8 @@ async def test_get_embeddings(mocker):
     mock_embeddings = MagicMock()
     mock_embeddings.data = [MagicMock(embedding=[0.1] * 1536) for _ in range(3)]
     
-    # We patch the 'client' object that was imported/created in ml_engine.py
-    with patch("app.services.ml_engine.client.embeddings.create", new_callable=AsyncMock) as mock_create:
+    # We patch the 'openai_client' object that was imported in embeddings.py
+    with patch("app.services.embeddings.openai_client.embeddings.create", new_callable=AsyncMock) as mock_create:
         mock_create.return_value = mock_embeddings
         
         texts = ["text1", "text2", "text3"]
@@ -31,7 +31,7 @@ async def test_get_cluster_label():
     mock_response.choices = [MagicMock()]
     mock_response.choices[0].message.content = "Financial Reports"
     
-    with patch("app.services.ml_engine.client.chat.completions.create", new_callable=AsyncMock) as mock_create:
+    with patch("app.services.ml_engine.openai_client.chat.completions.create", new_callable=AsyncMock) as mock_create:
         mock_create.return_value = mock_response
         
         label = await get_cluster_label([{"filename": "test.pdf", "text": "Some financial text content about invoices and money."}])
@@ -45,7 +45,7 @@ async def test_generate_dataset_summary():
     mock_response.choices = [MagicMock()]
     mock_response.choices[0].message.content = "A collection of financial documents."
     
-    with patch("app.services.ml_engine.client.chat.completions.create", new_callable=AsyncMock) as mock_create:
+    with patch("app.services.ml_engine.openai_client.chat.completions.create", new_callable=AsyncMock) as mock_create:
         mock_create.return_value = mock_response
         
         cluster_data = [{"category": "Finance", "text": "invoice text"}]
