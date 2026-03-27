@@ -2,12 +2,16 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.models.metadata import Base
+from contextlib import contextmanager
 import logging
+
 
 logger = logging.getLogger(__name__)
 
+
 engine = create_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 def init_db():
     # 1. Enable Extensions 
@@ -50,9 +54,16 @@ def init_db():
             logger.error(f"Vector indexing failed: {e}")
             conn.rollback()
 
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise 
     finally:
         db.close()
+
+
+get_db_ctx = contextmanager(get_db)
